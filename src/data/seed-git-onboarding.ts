@@ -1,0 +1,301 @@
+import type { Edge, Node } from "@xyflow/react";
+import type { OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
+
+const d = (partial: OpenSeerNodeData): OpenSeerNodeData => partial;
+
+export const SEED_GRAPH_ID = "demo-git-onboarding";
+export const SEED_GRAPH_NAME = "Git Onboarding (demo)";
+
+/** Example graph: executive → worker journey for Git onboarding. */
+export function createGitOnboardingSeed(): {
+  nodes: Node<OpenSeerNodeData>[];
+  edges: Edge<OpenSeerEdgeData>[];
+} {
+  const nodes: Node<OpenSeerNodeData>[] = [
+    {
+      id: "n-proposal",
+      type: "openSeer",
+      position: { x: 0, y: 120 },
+      data: d({
+        nodeType: "proposal",
+        title: "Git Onboarding Improvement",
+        shortDescription: "Reduce time-to-first-commit for new developers.",
+        status: "active",
+        owner: "Engineering Leadership",
+        tags: ["onboarding", "developer-experience"],
+        notes: "Driven by repeated support tickets during first week.",
+        objective: "Cut setup friction so engineers ship code day one.",
+        scope: "Terminal Git, SSH, and host configuration for all new hires.",
+        expectedBenefit: "Fewer interruptions to senior engineers; faster ramp.",
+      }),
+    },
+    {
+      id: "n-program",
+      type: "openSeer",
+      position: { x: 320, y: 120 },
+      data: d({
+        nodeType: "program",
+        title: "Developer Enablement",
+        shortDescription: "Cross-team initiative for tooling and docs.",
+        status: "active",
+        owner: "Platform Team",
+        tags: ["enablement", "git"],
+        notes: "Sponsored by VP Engineering.",
+      }),
+    },
+    {
+      id: "n-project",
+      type: "openSeer",
+      position: { x: 640, y: 120 },
+      data: d({
+        nodeType: "project",
+        title: "Git Setup Guide",
+        shortDescription: "Single source of truth for local Git configuration.",
+        status: "active",
+        owner: "Alex Morgan",
+        tags: ["documentation", "onboarding"],
+        notes: "Linked from HR onboarding checklist.",
+      }),
+    },
+    {
+      id: "n-howto",
+      type: "openSeer",
+      position: { x: 960, y: 120 },
+      data: d({
+        nodeType: "howto",
+        title: "Set Up Git in Terminal",
+        shortDescription: "End-to-end path from install to first push.",
+        status: "active",
+        owner: "Alex Morgan",
+        tags: ["how-to", "terminal"],
+        notes: "Keep steps copy-paste friendly.",
+        howToSummary:
+          "Install Git, authenticate with SSH, set identity, verify with a test clone.",
+        orderedSteps:
+          "1. Install Git\n2. Generate SSH key\n3. Add key to host\n4. Configure user.name / user.email\n5. Clone a sandbox repo",
+        relatedLinks: "https://git-scm.com/doc\nhttps://docs.github.com/en/authentication",
+      }),
+    },
+    {
+      id: "n-step1",
+      type: "openSeer",
+      position: { x: 1280, y: 0 },
+      data: d({
+        nodeType: "step",
+        title: "Install Git",
+        shortDescription: "Install Git for your operating system.",
+        status: "done",
+        owner: "New hire",
+        tags: ["setup"],
+        notes: "Use package manager where possible.",
+        commands: "macOS: brew install git\nWindows: winget install Git.Git",
+        expectedOutcome: "`git --version` prints a semver.",
+        troubleshooting: "If command not found, restart the terminal or check PATH.",
+      }),
+    },
+    {
+      id: "n-step2",
+      type: "openSeer",
+      position: { x: 1280, y: 140 },
+      data: d({
+        nodeType: "step",
+        title: "Generate SSH Key",
+        shortDescription: "Create ed25519 key and start agent.",
+        status: "active",
+        owner: "New hire",
+        tags: ["ssh", "security"],
+        notes: "Never commit private keys.",
+        commands:
+          "ssh-keygen -t ed25519 -C \"you@company.com\"\neval \"$(ssh-agent -s)\"\nssh-add ~/.ssh/id_ed25519",
+        expectedOutcome: "Public key ready to paste into Git host.",
+        troubleshooting: "Permission denied → check `ssh-add -l` and file modes (600).",
+      }),
+    },
+    {
+      id: "n-step3",
+      type: "openSeer",
+      position: { x: 1280, y: 280 },
+      data: d({
+        nodeType: "step",
+        title: "Configure Git User",
+        shortDescription: "Set name and email used on commits.",
+        status: "active",
+        owner: "New hire",
+        tags: ["config"],
+        notes: "Match corporate email policy.",
+        commands: "git config --global user.name \"Your Name\"\ngit config --global user.email \"you@company.com\"",
+        expectedOutcome: "`git config --list` shows correct identity.",
+        troubleshooting: "Wrong author on commits → override per-repo with local config.",
+      }),
+    },
+    {
+      id: "n-ev-screenshot",
+      type: "openSeer",
+      position: { x: 1600, y: 0 },
+      data: d({
+        nodeType: "evidence",
+        title: "Screenshot Example",
+        shortDescription: "Expected host UI after adding SSH key.",
+        status: "active",
+        owner: "Alex Morgan",
+        tags: ["evidence", "screenshot"],
+        notes: "Replace with internal wiki image if required.",
+        imageUrl: "https://images.unsplash.com/photo-1618401471353-b98afee0b2eb?w=640&q=80",
+        videoUrl: "",
+        sourceLink: "https://docs.github.com/en/authentication/connecting-to-github-with-ssh",
+        caption: "SSH keys page on GitHub — keys list with “Authentication key” label.",
+      }),
+    },
+    {
+      id: "n-ev-video",
+      type: "openSeer",
+      position: { x: 1600, y: 200 },
+      data: d({
+        nodeType: "evidence",
+        title: "Video Walkthrough Placeholder",
+        shortDescription: "Record Loom or internal clip and link here.",
+        status: "draft",
+        owner: "Alex Morgan",
+        tags: ["video", "training"],
+        notes: "MVP placeholder URL — swap for real recording.",
+        imageUrl: "",
+        videoUrl: "https://www.youtube.com/watch?v=wpISo9TNjfU",
+        sourceLink: "",
+        caption: "External placeholder: Git crash course (replace with org-owned media).",
+      }),
+    },
+    {
+      id: "n-risk",
+      type: "openSeer",
+      position: { x: 960, y: 340 },
+      data: d({
+        nodeType: "risk",
+        title: "New hires blocked on setup",
+        shortDescription: "SSH or host policy issues delay first PR.",
+        status: "active",
+        owner: "Alex Morgan",
+        tags: ["risk", "onboarding"],
+        notes: "Track in weekly enablement sync.",
+        severity: "medium",
+        impact: "2–3 day slip to first merged PR; mentor time lost.",
+        mitigation: "Pre-provision sandbox repo; IT runbook for firewall exceptions.",
+      }),
+    },
+    {
+      id: "n-cost",
+      type: "openSeer",
+      position: { x: 640, y: 320 },
+      data: d({
+        nodeType: "cost",
+        title: "8 hours creation effort",
+        shortDescription: "Initial guide + screenshots + review.",
+        status: "done",
+        owner: "Finance (inform)",
+        tags: ["cost", "estimate"],
+        notes: "One-time; maintenance ~1h/quarter.",
+        estimatedCost: "8h engineering",
+        actualCost: "8h engineering",
+        costType: "labor",
+      }),
+    },
+    {
+      id: "n-decision",
+      type: "openSeer",
+      position: { x: 320, y: 320 },
+      data: d({
+        nodeType: "decision",
+        title: "Standardize setup process",
+        shortDescription: "Adopt shared Git/SSH guide for all engineering teams.",
+        status: "done",
+        owner: "Engineering Leadership",
+        tags: ["decision", "standards"],
+        notes: "Communicated in all-hands Q3.",
+        rationale: "Fragmented docs caused inconsistent setups and security gaps.",
+        decisionDate: "2026-09-12",
+        outcome: "Approved — Platform maintains canonical HowTo and Evidence nodes.",
+      }),
+    },
+  ];
+
+  const edges: Edge<OpenSeerEdgeData>[] = [
+    {
+      id: "e1",
+      source: "n-proposal",
+      target: "n-program",
+      label: "feeds",
+      data: { label: "feeds", relationshipType: "feeds" },
+    },
+    {
+      id: "e2",
+      source: "n-program",
+      target: "n-project",
+      label: "contains",
+      data: { label: "contains", relationshipType: "contains" },
+    },
+    {
+      id: "e3",
+      source: "n-project",
+      target: "n-howto",
+      label: "documented_by",
+      data: { label: "documented_by", relationshipType: "documented_by" },
+    },
+    {
+      id: "e4",
+      source: "n-howto",
+      target: "n-step1",
+      label: "first_step",
+      data: { label: "first_step", relationshipType: "first_step" },
+    },
+    {
+      id: "e5",
+      source: "n-step1",
+      target: "n-step2",
+      label: "next",
+      data: { label: "next", relationshipType: "next" },
+    },
+    {
+      id: "e6",
+      source: "n-step2",
+      target: "n-step3",
+      label: "next",
+      data: { label: "next", relationshipType: "next" },
+    },
+    {
+      id: "e7",
+      source: "n-step2",
+      target: "n-ev-screenshot",
+      label: "illustrated_by",
+      data: { label: "illustrated_by", relationshipType: "illustrated_by" },
+    },
+    {
+      id: "e8",
+      source: "n-howto",
+      target: "n-ev-video",
+      label: "see_also",
+      data: { label: "see_also", relationshipType: "see_also" },
+    },
+    {
+      id: "e9",
+      source: "n-project",
+      target: "n-risk",
+      label: "risk",
+      data: { label: "risk", relationshipType: "has_risk" },
+    },
+    {
+      id: "e10",
+      source: "n-project",
+      target: "n-cost",
+      label: "cost",
+      data: { label: "cost", relationshipType: "has_cost" },
+    },
+    {
+      id: "e11",
+      source: "n-program",
+      target: "n-decision",
+      label: "decision",
+      data: { label: "decision", relationshipType: "decided" },
+    },
+  ];
+
+  return { nodes, edges };
+}
