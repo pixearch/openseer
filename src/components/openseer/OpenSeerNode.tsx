@@ -5,6 +5,7 @@ import {
   NodeResizer,
   Position,
   useReactFlow,
+  type Edge,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
@@ -29,45 +30,107 @@ import {
   NODE_TYPE_ACCENT_CLASS,
   NODE_TYPE_LABEL,
 } from "@/lib/node-type-meta";
-import type { OpenSeerNodeData } from "@/lib/types/graph";
+import type { OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
 
-function NestedGraphThumbnail({ nodes }: { nodes: Node<OpenSeerNodeData>[] }) {
-  if (nodes.length === 0) {
-    return <p className="text-center text-[10px] text-zinc-600">Empty subgraph</p>;
+function thumbnailNodeSize(n: Node<OpenSeerNodeData>): { w: number; h: number } {
+  if (typeof n.width === "number" && typeof n.height === "number") {
+    return { w: n.width, h: n.height };
   }
-  const box = nodes.map((n) => {
-    const nw = typeof n.width === "number" ? n.width : NODE_STANDARD_WIDTH;
-    const nh = typeof n.height === "number" ? n.height : NODE_STANDARD_HEIGHT;
-    return { id: n.id, x: n.position.x, y: n.position.y, w: nw, h: nh, nt: n.data.nodeType };
+  if (n.data.nodeType === "group") {
+    return { w: GROUP_STANDARD_WIDTH, h: GROUP_STANDARD_HEIGHT };
+  }
+  return { w: NODE_STANDARD_WIDTH, h: NODE_STANDARD_HEIGHT };
+}
+
+function NestedGraphThumbnail({
+  nodes,
+  edges = [],
+}: {
+  nodes: Node<OpenSeerNodeData>[];
+  edges?: Edge<OpenSeerEdgeData>[];
+}) {
+  if (nodes.length === 0) {
+    return (
+      <div className="flex h-full min-h-[72px] w-full items-center justify-center rounded-md border border-zinc-800/90 bg-zinc-950/60">
+        <p className="text-center text-[10px] text-zinc-600">Empty subgraph</p>
+      </div>
+    );
+  }
+
+  const items = nodes.map((n) => {
+    const { w, h } = thumbnailNodeSize(n);
+    const x = n.position.x;
+    const y = n.position.y;
+    return {
+      id: n.id,
+      x,
+      y,
+      w,
+      h,
+      nt: n.data.nodeType,
+      cx: x + w / 2,
+      cy: y + h / 2,
+    };
   });
-  const minX = Math.min(...box.map((b) => b.x));
-  const minY = Math.min(...box.map((b) => b.y));
-  const maxX = Math.max(...box.map((b) => b.x + b.w));
-  const maxY = Math.max(...box.map((b) => b.y + b.h));
+
+  const minX = Math.min(...items.map((b) => b.x));
+  const minY = Math.min(...items.map((b) => b.y));
+  const maxX = Math.max(...items.map((b) => b.x + b.w));
+  const maxY = Math.max(...items.map((b) => b.y + b.h));
   const bw = Math.max(maxX - minX, 1);
   const bh = Math.max(maxY - minY, 1);
-  const tw = 100;
-  const th = 64;
-  const s = Math.min(tw / bw, th / bh);
+  const pad = Math.max(bw, bh) * 0.08;
+  const vbX = minX - pad;
+  const vbY = minY - pad;
+  const vbW = bw + pad * 2;
+  const vbH = bh + pad * 2;
+  const stroke = Math.max(vbW, vbH) * 0.0035;
+  const nodeById = new Map(items.map((i) => [i.id, i]));
+
   return (
-    <div
-      className="relative mx-auto h-16 w-[100px] overflow-hidden rounded border border-zinc-700 bg-zinc-900"
-      aria-hidden
-    >
-      {box.map((b) => (
-        <div
-          key={b.id}
-          className="absolute rounded-sm border border-zinc-600/80"
-          style={{
-            left: (b.x - minX) * s,
-            top: (b.y - minY) * s,
-            width: Math.max(b.w * s, 4),
-            height: Math.max(b.h * s, 3),
-            backgroundColor: minimapColorForNodeType(b.nt),
-            opacity: 0.9,
-          }}
-        />
-      ))}
+    <div className="h-full min-h-[72px] w-full overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-950/90 shadow-[inset_0_1px_0_rgb(39_39_42/0.5)]">
+      <svg
+        width="100%"
+        height="100%"
+        viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
+        preserveAspectRatio="xMidYMid meet"
+        className="block"
+        aria-hidden
+      >
+        {edges.map((e) => {
+          const s = nodeById.get(e.source);
+          const t = nodeById.get(e.target);
+          if (!s || !t) return null;
+          return (
+            <line
+              key={e.id}
+              x1={s.cx}
+              y1={s.cy}
+              x2={t.cx}
+              y2={t.cy}
+              stroke="#64748b"
+              strokeWidth={stroke * 1.2}
+              strokeLinecap="round"
+              opacity={0.9}
+            />
+          );
+        })}
+        {items.map((b) => (
+          <rect
+            key={b.id}
+            x={b.x}
+            y={b.y}
+            width={b.w}
+            height={b.h}
+            rx={stroke * 3}
+            ry={stroke * 3}
+            fill={minimapColorForNodeType(b.nt)}
+            stroke="#18181b"
+            strokeWidth={stroke}
+            opacity={0.97}
+          />
+        ))}
+      </svg>
     </div>
   );
 }
@@ -183,6 +246,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
     const gw = w ?? GROUP_STANDARD_WIDTH;
     const gh = h ?? GROUP_STANDARD_HEIGHT;
     const nested = (data.nestedGraph?.nodes ?? []) as Node<OpenSeerNodeData>[];
+    const nestedEdges = (data.nestedGraph?.edges ?? []) as Edge<OpenSeerEdgeData>[];
     return (
       <div
         className={[
@@ -203,9 +267,11 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           </span>
           <div className="mt-0.5 truncate text-sm font-semibold text-zinc-100">{data.title}</div>
         </div>
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-2 py-2 text-center">
-          <NestedGraphThumbnail nodes={nested} />
-          <p className="text-[10px] text-zinc-600">Double-click to open</p>
+        <div className="flex min-h-0 flex-1 flex-col gap-1 px-2 pb-2 pt-1">
+          <div className="min-h-[96px] min-w-0 flex-1">
+            <NestedGraphThumbnail nodes={nested} edges={nestedEdges} />
+          </div>
+          <p className="shrink-0 text-center text-[10px] text-zinc-600">Double-click to open</p>
         </div>
         <Handle
           type="source"

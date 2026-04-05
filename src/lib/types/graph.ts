@@ -20,6 +20,11 @@ export const OPEN_SEER_NODE_TYPES = [
 
 export type OpenSeerNodeType = (typeof OPEN_SEER_NODE_TYPES)[number];
 
+/** Add-node menus (sidebar, canvas); `frame` is only created via multi-select grouping. */
+export const ADD_NODE_MENU_TYPES: OpenSeerNodeType[] = OPEN_SEER_NODE_TYPES.filter(
+  (t) => t !== "frame"
+);
+
 export const OPEN_SEER_STATUSES = [
   "draft",
   "active",

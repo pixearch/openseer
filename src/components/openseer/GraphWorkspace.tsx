@@ -49,7 +49,7 @@ import {
 } from "@/lib/services/graph-storage";
 import { clampFixedMenuPosition } from "@/lib/ui/clamp-context-menu";
 import type { OpenSeerEdgeData, OpenSeerNodeData, OpenSeerNodeType } from "@/lib/types/graph";
-import { OPEN_SEER_NODE_TYPES } from "@/lib/types/graph";
+import { ADD_NODE_MENU_TYPES, OPEN_SEER_NODE_TYPES } from "@/lib/types/graph";
 
 const nodeTypes = { openSeer: OpenSeerNode };
 
@@ -60,7 +60,7 @@ const defaultEdgeOptions = {
 };
 
 const CTX_MENU_W = 208;
-const CTX_MENU_H_PANE = 420;
+const CTX_MENU_H_PANE = 400;
 const CTX_MENU_H_NODES = 220;
 
 type CtxMenu =
@@ -678,7 +678,7 @@ function GraphWorkspaceInner() {
             })()}
           >
             {ctxMenu.kind === "pane" ? (
-              OPEN_SEER_NODE_TYPES.map((t) => (
+              ADD_NODE_MENU_TYPES.map((t) => (
                 <button
                   key={t}
                   type="button"
