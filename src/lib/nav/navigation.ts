@@ -1,7 +1,6 @@
 export type NavItem = {
   label: string;
   href: string;
-  /** MVP: section receives fuller treatment in UI */
   wired?: boolean;
 };
 
@@ -9,15 +8,23 @@ export type NavSection = {
   id: string;
   label: string;
   href: string;
-  icon: "home" | "workspace" | "graphs" | "projects" | "knowledge" | "teams" | "documents" | "proposals" | "financials" | "risks" | "activity" | "search" | "integrations" | "admin" | "settings";
+  icon:
+    | "home"
+    | "workspace"
+    | "graphs"
+    | "teams"
+    | "documents"
+    | "activity"
+    | "search"
+    | "integrations"
+    | "admin"
+    | "settings";
   items: NavItem[];
-  /** Priority sections for MVP wiring */
   mvpWired: boolean;
 };
 
 export const WORKSPACE_CONTEXT_DEFAULT = "Demo Org · Default workspace";
 
-/** Primary rail: full enterprise structure per product spec */
 export const NAV_SECTIONS: NavSection[] = [
   {
     id: "home",
@@ -29,8 +36,6 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Dashboard", href: "/", wired: true },
       { label: "Recent Work", href: "/home/recent", wired: true },
       { label: "Favorites", href: "/home/favorites" },
-      { label: "Assigned To Me", href: "/home/assigned" },
-      { label: "Notifications", href: "/home/notifications" },
       { label: "Quick Start", href: "/home/quick-start", wired: true },
     ],
   },
@@ -42,7 +47,7 @@ export const NAV_SECTIONS: NavSection[] = [
     mvpWired: true,
     items: [
       { label: "All Workspaces", href: "/workspace" },
-      { label: "Current Workspace", href: "/workspace/graph", wired: true },
+      { label: "My Workspaces", href: "/workspace/my" },
       { label: "Create Workspace", href: "/workspace/new" },
       { label: "Shared Workspaces", href: "/workspace/shared" },
       { label: "Archived Workspaces", href: "/workspace/archived" },
@@ -61,41 +66,6 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Templates", href: "/graphs/templates" },
       { label: "Create New Graph", href: "/workspace/graph", wired: true },
       { label: "Archived Graphs", href: "/graphs/archived" },
-    ],
-  },
-  {
-    id: "projects",
-    label: "Projects",
-    href: "/projects",
-    icon: "projects",
-    mvpWired: true,
-    items: [
-      { label: "Portfolio", href: "/projects" },
-      { label: "Programs", href: "/projects/programs" },
-      { label: "Projects", href: "/projects/list", wired: true },
-      { label: "Epics", href: "/projects/epics" },
-      { label: "Sprints", href: "/projects/sprints" },
-      { label: "Tasks", href: "/projects/tasks" },
-      { label: "Milestones", href: "/projects/milestones" },
-      { label: "Roadmaps", href: "/projects/roadmaps" },
-      { label: "Create New Project", href: "/projects/new" },
-    ],
-  },
-  {
-    id: "knowledge",
-    label: "Knowledge",
-    href: "/knowledge",
-    icon: "knowledge",
-    mvpWired: true,
-    items: [
-      { label: "How-To Guides", href: "/knowledge/how-tos", wired: true },
-      { label: "Procedures", href: "/knowledge/procedures" },
-      { label: "Training", href: "/knowledge/training" },
-      { label: "Playbooks", href: "/knowledge/playbooks" },
-      { label: "Best Practices", href: "/knowledge/best-practices" },
-      { label: "FAQs", href: "/knowledge/faqs" },
-      { label: "Templates", href: "/knowledge/templates" },
-      { label: "Create New Guide", href: "/knowledge/new" },
     ],
   },
   {
@@ -132,54 +102,6 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Drafts", href: "/documents/drafts" },
       { label: "Archived Documents", href: "/documents/archived" },
       { label: "Create New Document", href: "/documents/new" },
-    ],
-  },
-  {
-    id: "proposals",
-    label: "Proposals",
-    href: "/proposals",
-    icon: "proposals",
-    mvpWired: true,
-    items: [
-      { label: "All Proposals", href: "/proposals", wired: true },
-      { label: "Draft Proposals", href: "/proposals/drafts" },
-      { label: "Approved Proposals", href: "/proposals/approved" },
-      { label: "Business Cases", href: "/proposals/business-cases" },
-      { label: "Executive Summaries", href: "/proposals/executive" },
-      { label: "Decisions", href: "/proposals/decisions" },
-      { label: "Create New Proposal", href: "/proposals/new" },
-    ],
-  },
-  {
-    id: "financials",
-    label: "Financials",
-    href: "/financials",
-    icon: "financials",
-    mvpWired: false,
-    items: [
-      { label: "Cost Items", href: "/financials/costs" },
-      { label: "Budgets", href: "/financials/budgets" },
-      { label: "Estimated vs Actual", href: "/financials/estimate-actual" },
-      { label: "Benefit Tracking", href: "/financials/benefits" },
-      { label: "ROI", href: "/financials/roi" },
-      { label: "Cost Benefit Analysis", href: "/financials/cba" },
-      { label: "Financial Summaries", href: "/financials/summaries" },
-    ],
-  },
-  {
-    id: "risks",
-    label: "Risks and Governance",
-    href: "/risks",
-    icon: "risks",
-    mvpWired: false,
-    items: [
-      { label: "Risks", href: "/risks/risks" },
-      { label: "Controls", href: "/risks/controls" },
-      { label: "POA&M", href: "/risks/poam" },
-      { label: "Decisions", href: "/risks/decisions" },
-      { label: "Audit Findings", href: "/risks/audit" },
-      { label: "Compliance Mapping", href: "/risks/compliance" },
-      { label: "Governance Reviews", href: "/risks/reviews" },
     ],
   },
   {
@@ -266,13 +188,7 @@ export const NAV_SECTIONS: NavSection[] = [
 export const CREATE_MENU_ITEMS = [
   { label: "New Graph", href: "/workspace/graph" },
   { label: "New Node", href: "/workspace/graph" },
-  { label: "New Project", href: "/projects/new" },
-  { label: "New Task", href: "/projects/tasks" },
-  { label: "New How-To Guide", href: "/knowledge/new" },
   { label: "New Document", href: "/documents/new" },
-  { label: "New Proposal", href: "/proposals/new" },
-  { label: "New Risk", href: "/risks/risks" },
-  { label: "New Cost Item", href: "/financials/costs" },
   { label: "New Team", href: "/teams/new" },
   { label: "New Workspace", href: "/workspace/new" },
 ] as const;

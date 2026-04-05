@@ -110,7 +110,13 @@ export function InspectorPanel({
   return (
     <aside className="flex h-full w-[340px] shrink-0 flex-col border-l border-zinc-800 bg-zinc-950/95">
       <div className="border-b border-zinc-800 px-4 py-3">
-        <h2 className="text-sm font-semibold capitalize text-zinc-100">{data.nodeType.replace("howto", "how-to")}</h2>
+        <h2 className="text-sm font-semibold capitalize text-zinc-100">
+          {data.nodeType === "howto"
+            ? "How-to"
+            : data.nodeType === "group"
+              ? "Group"
+              : data.nodeType}
+        </h2>
         <p className="mt-0.5 truncate text-xs text-zinc-500" title={data.title}>
           {data.title}
         </p>
@@ -267,6 +273,16 @@ export function InspectorPanel({
                 onChange={(e) => patch({ sourceLink: e.target.value })}
               />
             </Field>
+            {data.sourceLink ? (
+              <a
+                href={data.sourceLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block truncate text-xs text-sky-400 hover:text-sky-300"
+              >
+                {data.sourceLink}
+              </a>
+            ) : null}
             <Field label="Caption">
               <textarea
                 className={textareaClass}
@@ -364,6 +380,60 @@ export function InspectorPanel({
                 rows={2}
               />
             </Field>
+          </>
+        ) : null}
+
+        {data.nodeType === "image" ? (
+          <>
+            <hr className="border-zinc-800" />
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Image</p>
+            <Field label="Image URL">
+              <input
+                className={inputClass}
+                value={data.imageUrl ?? ""}
+                onChange={(e) => patch({ imageUrl: e.target.value })}
+              />
+            </Field>
+            <Field label="Caption">
+              <textarea
+                className={textareaClass}
+                value={data.caption ?? ""}
+                onChange={(e) => patch({ caption: e.target.value })}
+                rows={2}
+              />
+            </Field>
+          </>
+        ) : null}
+
+        {data.nodeType === "video" ? (
+          <>
+            <hr className="border-zinc-800" />
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Video</p>
+            <Field label="Video URL">
+              <input
+                className={inputClass}
+                value={data.videoUrl ?? ""}
+                onChange={(e) => patch({ videoUrl: e.target.value })}
+              />
+            </Field>
+            <Field label="Caption">
+              <textarea
+                className={textareaClass}
+                value={data.caption ?? ""}
+                onChange={(e) => patch({ caption: e.target.value })}
+                rows={2}
+              />
+            </Field>
+          </>
+        ) : null}
+
+        {data.nodeType === "group" ? (
+          <>
+            <hr className="border-zinc-800" />
+            <p className="text-xs text-zinc-500">
+              Group name uses <strong className="text-zinc-400">Title</strong> above. Double-click this node on
+              the canvas to edit the nested graph.
+            </p>
           </>
         ) : null}
 

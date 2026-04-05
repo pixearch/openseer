@@ -12,7 +12,7 @@ function findCurrentItem(section: NavSection, pathname: string): NavItem | null 
 }
 
 function graphCta(sectionId: string) {
-  return ["graphs", "workspace", "projects", "knowledge", "documents", "proposals"].includes(sectionId);
+  return ["graphs", "workspace", "documents"].includes(sectionId);
 }
 
 export function SectionView({ sectionId }: { sectionId: string }) {

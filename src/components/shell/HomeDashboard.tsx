@@ -16,27 +16,9 @@ const cards = [
     tag: "Navigate",
   },
   {
-    title: "Projects",
-    desc: "Portfolio through tasks — execution structure tied to the graph.",
-    href: "/projects",
-    tag: "Navigate",
-  },
-  {
-    title: "Knowledge",
-    desc: "How-tos, procedures, and training content linked to operational nodes.",
-    href: "/knowledge",
-    tag: "Navigate",
-  },
-  {
     title: "Documents",
     desc: "Written artifacts, evidence attachments, and references.",
     href: "/documents",
-    tag: "Navigate",
-  },
-  {
-    title: "Proposals",
-    desc: "Strategic proposals, business cases, and executive decisions.",
-    href: "/proposals",
     tag: "Navigate",
   },
   {
@@ -56,8 +38,6 @@ const cards = [
 const quick = [
   { label: "Recent Work", href: "/home/recent" },
   { label: "Favorites", href: "/home/favorites" },
-  { label: "Assigned To Me", href: "/home/assigned" },
-  { label: "Notifications", href: "/home/notifications" },
   { label: "Quick Start", href: "/home/quick-start" },
 ];
 
