@@ -1,26 +1,9 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { NODE_TYPE_LABEL } from "@/lib/node-type-meta";
 import type { OpenSeerNodeType } from "@/lib/types/graph";
 import { OPEN_SEER_NODE_TYPES } from "@/lib/types/graph";
-
-const TYPE_FILTER_LABEL: Record<OpenSeerNodeType, string> = {
-  proposal: "Proposal",
-  program: "Program",
-  project: "Project",
-  epic: "Epic",
-  sprint: "Sprint",
-  task: "Task",
-  step: "Step",
-  howto: "How-To",
-  evidence: "Evidence",
-  risk: "Risk",
-  cost: "Cost",
-  decision: "Decision",
-  image: "Image",
-  video: "Video",
-  group: "Group",
-};
 
 interface GraphSidebarProps {
   graphName: string;
@@ -83,7 +66,7 @@ export function GraphSidebar({
                       closeMenu();
                     }}
                   >
-                    {TYPE_FILTER_LABEL[t]}
+                    {NODE_TYPE_LABEL[t]}
                   </button>
                 ))}
               </div>
@@ -132,7 +115,7 @@ export function GraphSidebar({
                     onChange={() => onToggleType(t)}
                     className="rounded border-zinc-600 bg-zinc-900 text-sky-600 focus:ring-sky-600"
                   />
-                  <span className="text-sm text-zinc-300">{TYPE_FILTER_LABEL[t]}</span>
+                  <span className="text-sm text-zinc-300">{NODE_TYPE_LABEL[t]}</span>
                 </label>
               </li>
             );

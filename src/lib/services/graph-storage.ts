@@ -12,6 +12,19 @@ export function loadGraphDocument(): OpenSeerGraphDocument | null {
     if (parsed?.version !== 1 || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
       return null;
     }
+    const nodesOk = parsed.nodes.every(
+      (n) => n && typeof n === "object" && typeof (n as { id?: unknown }).id === "string"
+    );
+    const edgesOk = parsed.edges.every(
+      (e) =>
+        e &&
+        typeof e === "object" &&
+        typeof (e as { source?: unknown }).source === "string" &&
+        typeof (e as { target?: unknown }).target === "string"
+    );
+    if (!nodesOk || !edgesOk) {
+      return null;
+    }
     return parsed;
   } catch {
     return null;
@@ -23,7 +36,9 @@ export function saveGraphDocument(doc: OpenSeerGraphDocument): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(doc));
   } catch {
-    /* quota or private mode */
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("[openseer] Could not save graph to localStorage (quota or private mode).");
+    }
   }
 }
 
