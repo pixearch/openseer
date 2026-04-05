@@ -1,7 +1,7 @@
 "use client";
 
-import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { memo, useState } from "react";
+import { Handle, Position, useReactFlow, type Node, type NodeProps } from "@xyflow/react";
+import { memo, useCallback, useRef, useState, type DragEvent } from "react";
 import { createPortal } from "react-dom";
 import { NODE_TYPE_ACCENT_CLASS, NODE_TYPE_LABEL } from "@/lib/node-type-meta";
 import type { OpenSeerNodeData } from "@/lib/types/graph";
@@ -15,10 +15,29 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
-  const { data, selected } = props;
+  const { data, selected, id } = props;
   const w = typeof props.width === "number" ? props.width : undefined;
   const h = typeof props.height === "number" ? props.height : undefined;
   const [lightbox, setLightbox] = useState(false);
+  const { setNodes } = useReactFlow();
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const applyImageFromFile = useCallback(
+    (file: File) => {
+      if (!file.type.startsWith("image/")) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = reader.result as string;
+        setNodes((nodes) =>
+          nodes.map((n) =>
+            n.id === id ? { ...n, data: { ...n.data, imageUrl: url } } : n
+          )
+        );
+      };
+      reader.readAsDataURL(file);
+    },
+    [id, setNodes]
+  );
 
   const accent = NODE_TYPE_ACCENT_CLASS[data.nodeType];
   const typeLabel = NODE_TYPE_LABEL[data.nodeType];
@@ -63,8 +82,31 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   }
 
   if (data.nodeType === "image") {
+    const onImageDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const onImageDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const f = e.dataTransfer.files[0];
+      if (f) applyImageFromFile(f);
+    };
+
     return (
       <>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          aria-hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) applyImageFromFile(f);
+            e.target.value = "";
+          }}
+        />
         <div
           className={[
             "min-w-[200px] max-w-[260px] overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
@@ -78,17 +120,28 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             position={Position.Left}
             className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
           />
-          <div className="border-b border-zinc-800/80 px-2 py-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-              {typeLabel}
-            </span>
-            <div className="truncate text-sm font-medium text-zinc-100">{data.title}</div>
+          <div className="flex items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
+            <div className="min-w-0 flex-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                {typeLabel}
+              </span>
+              <div className="truncate text-sm font-medium text-zinc-100">{data.title}</div>
+            </div>
+            <button
+              type="button"
+              className="shrink-0 rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800"
+              onClick={() => fileRef.current?.click()}
+            >
+              Load…
+            </button>
           </div>
           {data.imageUrl ? (
             <button
               type="button"
               className="block w-full cursor-zoom-in focus:outline-none"
               onClick={() => setLightbox(true)}
+              onDragOver={onImageDragOver}
+              onDrop={onImageDrop}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -98,8 +151,12 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
               />
             </button>
           ) : (
-            <div className="flex h-28 items-center justify-center bg-zinc-950 text-xs text-zinc-600">
-              Set image URL
+            <div
+              className="flex h-28 flex-col items-center justify-center gap-1 bg-zinc-950 px-2 text-center text-xs text-zinc-600"
+              onDragOver={onImageDragOver}
+              onDrop={onImageDrop}
+            >
+              <span>Set image URL or drop a file</span>
             </div>
           )}
           <Handle

@@ -394,7 +394,7 @@ function GraphWorkspaceInner() {
     [screenToFlowPosition, onAddNodeAt]
   );
 
-  const onPaneContextMenu = useCallback(
+  const openPaneContextMenu = useCallback(
     (e: ReactMouseEvent<Element> | globalThis.MouseEvent) => {
       e.preventDefault();
       const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
@@ -407,6 +407,23 @@ function GraphWorkspaceInner() {
       });
     },
     [screenToFlowPosition]
+  );
+
+  const onFlowContextMenuCapture = useCallback((e: ReactMouseEvent<Element>) => {
+    e.preventDefault();
+  }, []);
+
+  const onFlowContextMenu = useCallback(
+    (e: ReactMouseEvent<Element>) => {
+      const t = e.target as Element;
+      if (t.closest(".react-flow__node")) return;
+      if (t.closest(".react-flow__nodesselection-rect")) return;
+      if (t.closest(".react-flow__edge")) return;
+      if (t.closest(".react-flow__pane")) {
+        openPaneContextMenu(e);
+      }
+    },
+    [openPaneContextMenu]
   );
 
   const onNodeContextMenu: NodeMouseHandler = useCallback(
@@ -423,6 +440,20 @@ function GraphWorkspaceInner() {
       });
     },
     [getNodes]
+  );
+
+  const onSelectionContextMenu = useCallback(
+    (e: ReactMouseEvent<Element>, nodes: Node<OpenSeerNodeData>[]) => {
+      e.preventDefault();
+      const selectedIds = nodes.map((n) => n.id);
+      setCtxMenu({
+        kind: "nodes",
+        clientX: e.clientX,
+        clientY: e.clientY,
+        selectedIds,
+      });
+    },
+    []
   );
 
   const onNodeDoubleClick: NodeMouseHandler = useCallback(
@@ -455,7 +486,12 @@ function GraphWorkspaceInner() {
   const crumbTitles = useMemo(() => titlesAlongPath(doc.nodes, groupPath), [doc.nodes, groupPath]);
 
   const flowColumn = (
-    <div ref={flowAreaRef} className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[#0c0c0e]">
+    <div
+      ref={flowAreaRef}
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[#0c0c0e]"
+      onContextMenuCapture={onFlowContextMenuCapture}
+      onContextMenu={onFlowContextMenu}
+    >
       {focusMode ? (
         <div className="flex shrink-0 items-center justify-end border-b border-zinc-800 bg-zinc-950 px-2 py-1">
           <button
@@ -518,7 +554,7 @@ function GraphWorkspaceInner() {
         onEdgesDelete={onEdgesDelete}
         onConnect={onConnect}
         onSelectionChange={onSelectionChange}
-        onPaneContextMenu={onPaneContextMenu}
+        onSelectionContextMenu={onSelectionContextMenu}
         onNodeContextMenu={onNodeContextMenu}
         onNodeDoubleClick={onNodeDoubleClick}
         nodeTypes={nodeTypes}
