@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { NODE_TYPE_LABEL } from "@/lib/node-type-meta";
 import type { OpenSeerNodeType } from "@/lib/types/graph";
-import { ADD_NODE_MENU_TYPES, OPEN_SEER_NODE_TYPES } from "@/lib/types/graph";
+import { GRAPH_WORKSPACE_NODE_TYPE_LIST } from "@/lib/types/graph";
 
 interface GraphSidebarProps {
   graphName: string;
@@ -38,7 +38,7 @@ export function GraphSidebar({
         </p>
       </div>
 
-      <div className="border-b border-zinc-800 p-3 space-y-2">
+      <div className="space-y-2 border-b border-zinc-800 p-3">
         <div className="relative" ref={addWrapRef}>
           <button
             type="button"
@@ -56,7 +56,7 @@ export function GraphSidebar({
                 onClick={closeMenu}
               />
               <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-[min(70vh,320px)] overflow-y-auto rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl">
-                {ADD_NODE_MENU_TYPES.map((t) => (
+                {GRAPH_WORKSPACE_NODE_TYPE_LIST.map((t) => (
                   <button
                     key={t}
                     type="button"
@@ -104,7 +104,7 @@ export function GraphSidebar({
           Toggle types to focus the canvas. Hidden nodes and their connections are removed from view.
         </p>
         <ul className="space-y-1">
-          {OPEN_SEER_NODE_TYPES.map((t) => {
+          {GRAPH_WORKSPACE_NODE_TYPE_LIST.map((t) => {
             const on = visibleTypes.has(t);
             return (
               <li key={t}>

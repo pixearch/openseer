@@ -67,7 +67,9 @@ function InspectorNodeEditor({
               ? "Grouping"
               : draft.nodeType === "frame"
                 ? "Group nodes"
-                : draft.nodeType}
+                : draft.nodeType === "text"
+                  ? "Text"
+                  : draft.nodeType}
         </h2>
         <p className="mt-0.5 truncate text-xs text-zinc-500" title={draft.title}>
           {draft.title}
