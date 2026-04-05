@@ -37,7 +37,7 @@ import {
   patchNestedGraph,
   titlesAlongPath,
 } from "@/lib/graph/nested-graph";
-import { minimapColorForNodeType } from "@/lib/node-type-meta";
+import { minimapColorForNodeType, NODE_TYPE_LABEL } from "@/lib/node-type-meta";
 import {
   documentFromState,
   loadGraphDocument,
@@ -635,7 +635,7 @@ function GraphWorkspaceInner() {
                     setCtxMenu(null);
                   }}
                 >
-                  {t === "howto" ? "How-To" : t}
+                  {NODE_TYPE_LABEL[t]}
                 </button>
               ))
             ) : (
@@ -646,12 +646,12 @@ function GraphWorkspaceInner() {
                     className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
                     onClick={runGroupSelection}
                   >
-                    Group selection
+                    Frame selection
                   </button>
                 ) : null}
                 <p className="px-3 py-1 text-[11px] text-zinc-600">
                   {ctxMenu.selectedIds.length < 2
-                    ? "Select 2+ nodes (Shift-click) to group."
+                    ? "Select 2+ nodes (Shift-click) to frame together."
                     : ""}
                 </p>
               </>

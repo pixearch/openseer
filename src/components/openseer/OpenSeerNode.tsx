@@ -23,8 +23,53 @@ import {
   NODE_STANDARD_HEIGHT,
   NODE_STANDARD_WIDTH,
 } from "@/lib/default-node";
-import { NODE_TYPE_ACCENT_CLASS, NODE_TYPE_LABEL } from "@/lib/node-type-meta";
+import {
+  minimapColorForNodeType,
+  NODE_TYPE_ACCENT_CLASS,
+  NODE_TYPE_LABEL,
+} from "@/lib/node-type-meta";
 import type { OpenSeerNodeData } from "@/lib/types/graph";
+
+function NestedGraphThumbnail({ nodes }: { nodes: Node<OpenSeerNodeData>[] }) {
+  if (nodes.length === 0) {
+    return <p className="text-center text-[10px] text-zinc-600">Empty subgraph</p>;
+  }
+  const box = nodes.map((n) => {
+    const nw = typeof n.width === "number" ? n.width : NODE_STANDARD_WIDTH;
+    const nh = typeof n.height === "number" ? n.height : NODE_STANDARD_HEIGHT;
+    return { id: n.id, x: n.position.x, y: n.position.y, w: nw, h: nh, nt: n.data.nodeType };
+  });
+  const minX = Math.min(...box.map((b) => b.x));
+  const minY = Math.min(...box.map((b) => b.y));
+  const maxX = Math.max(...box.map((b) => b.x + b.w));
+  const maxY = Math.max(...box.map((b) => b.y + b.h));
+  const bw = Math.max(maxX - minX, 1);
+  const bh = Math.max(maxY - minY, 1);
+  const tw = 100;
+  const th = 64;
+  const s = Math.min(tw / bw, th / bh);
+  return (
+    <div
+      className="relative mx-auto h-16 w-[100px] overflow-hidden rounded border border-zinc-700 bg-zinc-900"
+      aria-hidden
+    >
+      {box.map((b) => (
+        <div
+          key={b.id}
+          className="absolute rounded-sm border border-zinc-600/80"
+          style={{
+            left: (b.x - minX) * s,
+            top: (b.y - minY) * s,
+            width: Math.max(b.w * s, 4),
+            height: Math.max(b.h * s, 3),
+            backgroundColor: minimapColorForNodeType(b.nt),
+            opacity: 0.9,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
 
 const STATUS_DOT: Record<string, string> = {
   draft: "bg-zinc-500",
@@ -97,13 +142,47 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
     />
   );
 
-  if (data.nodeType === "group") {
-    const gw = w ?? GROUP_STANDARD_WIDTH;
-    const gh = h ?? GROUP_STANDARD_HEIGHT;
+  if (data.nodeType === "frame") {
+    const fw = w ?? NODE_STANDARD_WIDTH;
+    const fh = h ?? NODE_STANDARD_HEIGHT;
     return (
       <div
         className={[
-          "flex flex-col rounded-lg border-2 border-dashed border-teal-600/70 bg-zinc-950/90 shadow-lg",
+          "flex min-h-0 flex-col rounded-lg border-2 border-dashed border-slate-500/80 bg-zinc-950/40 shadow-lg",
+          selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
+        ].join(" ")}
+        style={{ width: fw, height: fh }}
+      >
+        {resizerStandard}
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
+        />
+        <div className="shrink-0 border-b border-slate-800/80 bg-slate-950/50 px-2 py-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            {typeLabel}
+          </span>
+          <div className="truncate text-sm font-semibold text-zinc-100">{data.title}</div>
+        </div>
+        <div className="min-h-0 flex-1 rounded-b-md bg-transparent" />
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
+        />
+      </div>
+    );
+  }
+
+  if (data.nodeType === "group") {
+    const gw = w ?? GROUP_STANDARD_WIDTH;
+    const gh = h ?? GROUP_STANDARD_HEIGHT;
+    const nested = (data.nestedGraph?.nodes ?? []) as Node<OpenSeerNodeData>[];
+    return (
+      <div
+        className={[
+          "flex min-h-0 flex-col rounded-lg border-2 border-dashed border-teal-600/70 bg-zinc-950/90 shadow-lg",
           selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
         ].join(" ")}
         style={{ width: gw, height: gh }}
@@ -114,14 +193,14 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           position={Position.Left}
           className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
         />
-        <div className="border-b border-teal-900/50 bg-teal-950/40 px-2 py-1.5">
+        <div className="shrink-0 border-b border-teal-900/50 bg-teal-950/40 px-2 py-1.5">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-teal-400/90">
             {typeLabel}
           </span>
           <div className="mt-0.5 truncate text-sm font-semibold text-zinc-100">{data.title}</div>
         </div>
-        <div className="flex flex-1 flex-col justify-center px-3 py-2 text-center">
-          <p className="text-[11px] text-zinc-500">Nested graph</p>
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-2 py-2 text-center">
+          <NestedGraphThumbnail nodes={nested} />
           <p className="text-[10px] text-zinc-600">Double-click to open</p>
         </div>
         <Handle

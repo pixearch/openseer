@@ -14,6 +14,7 @@ export const OPEN_SEER_NODE_TYPES = [
   "decision",
   "image",
   "video",
+  "frame",
   "group",
 ] as const;
 

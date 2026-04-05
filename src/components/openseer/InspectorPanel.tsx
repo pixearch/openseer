@@ -65,7 +65,9 @@ function InspectorNodeEditor({
             ? "How-to"
             : draft.nodeType === "group"
               ? "Group"
-              : draft.nodeType}
+              : draft.nodeType === "frame"
+                ? "Frame"
+                : draft.nodeType}
         </h2>
         <p className="mt-0.5 truncate text-xs text-zinc-500" title={draft.title}>
           {draft.title}
@@ -378,6 +380,15 @@ function InspectorNodeEditor({
                 rows={2}
               />
             </Field>
+          </>
+        ) : null}
+
+        {draft.nodeType === "frame" ? (
+          <>
+            <hr className="border-zinc-800" />
+            <p className="text-xs text-zinc-500">
+              Drag the frame to move grouped nodes. Resize the frame to change the box; nodes stay inside.
+            </p>
           </>
         ) : null}
 
