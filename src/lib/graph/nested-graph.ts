@@ -9,6 +9,49 @@ import {
 import { FRAME_HEADER_RESERVE_PX } from "@/lib/graph/frame-chrome";
 import type { OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
 
+/**
+ * @xyflow requires each parent before its children in `nodes`. Also stabilizes drag/resize updates.
+ */
+export function sortParentsBeforeChildren(
+  nodes: Node<OpenSeerNodeData>[]
+): Node<OpenSeerNodeData>[] {
+  if (nodes.length <= 1) return nodes;
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const memo = new Map<string, number>();
+
+  function depthOf(id: string, visiting: Set<string>): number {
+    if (memo.has(id)) return memo.get(id)!;
+    if (visiting.has(id)) {
+      memo.set(id, 0);
+      return 0;
+    }
+    const n = byId.get(id);
+    if (!n?.parentId || !byId.has(n.parentId)) {
+      memo.set(id, 0);
+      return 0;
+    }
+    visiting.add(id);
+    const d = 1 + depthOf(n.parentId, visiting);
+    visiting.delete(id);
+    memo.set(id, d);
+    return d;
+  }
+
+  for (const n of nodes) {
+    depthOf(n.id, new Set());
+  }
+
+  const orig = new Map(nodes.map((n, i) => [n.id, i]));
+  const sorted = [...nodes].sort((a, b) => {
+    const da = memo.get(a.id) ?? 0;
+    const db = memo.get(b.id) ?? 0;
+    if (da !== db) return da - db;
+    return (orig.get(a.id) ?? 0) - (orig.get(b.id) ?? 0);
+  });
+  if (sorted.every((n, i) => n === nodes[i])) return nodes;
+  return sorted;
+}
+
 export function getViewGraph(
   rootNodes: Node<OpenSeerNodeData>[],
   rootEdges: Edge<OpenSeerEdgeData>[],
@@ -127,7 +170,8 @@ export function clampFrameChildrenPositions(
 export function clampFrameChildrenEverywhere(
   nodes: Node<OpenSeerNodeData>[]
 ): Node<OpenSeerNodeData>[] {
-  const top = clampFrameChildrenPositions(nodes);
+  const clamped = clampFrameChildrenPositions(nodes);
+  const top = sortParentsBeforeChildren(clamped);
   let any = top !== nodes;
   const mapped = top.map((n) => {
     if (n.data.nodeType !== "group" || !n.data.nestedGraph?.nodes?.length) return n;
@@ -287,7 +331,7 @@ export function groupSelectedNodes(
 
   const merged = [...pushed, frameNode, ...reparented];
   return {
-    nodes: clampFrameChildrenPositions(merged),
+    nodes: sortParentsBeforeChildren(clampFrameChildrenPositions(merged)),
     edges: viewEdges,
   };
 }
@@ -314,7 +358,7 @@ export function ungroupFrame(
     };
   });
 
-  return { nodes: [...without, ...freed], edges: viewEdges };
+  return { nodes: sortParentsBeforeChildren([...without, ...freed]), edges: viewEdges };
 }
 
 /** Moves one node out of its frame to absolute coordinates; removes an empty frame. */
@@ -344,5 +388,5 @@ export function ungroupNodeFromFrame(
     nodes = nodes.filter((x) => x.id !== parent.id);
   }
 
-  return { nodes, edges: viewEdges };
+  return { nodes: sortParentsBeforeChildren(nodes), edges: viewEdges };
 }

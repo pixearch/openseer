@@ -37,6 +37,7 @@ import {
   getViewGraph,
   groupSelectedNodes,
   patchNestedGraph,
+  sortParentsBeforeChildren,
   titlesAlongPath,
   ungroupFrame,
   ungroupNodeFromFrame,
@@ -170,9 +171,10 @@ function GraphWorkspaceInner() {
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const nn = applyNodeChanges(changes, v.nodes);
         const clamped = clampFrameChildrenPositions(nn);
-        if (groupPath.length === 0) return { nodes: clamped, edges: d.edges };
+        const ordered = sortParentsBeforeChildren(clamped);
+        if (groupPath.length === 0) return { nodes: ordered, edges: d.edges };
         return {
-          nodes: patchNestedGraph(d.nodes, groupPath, clamped, v.edges),
+          nodes: patchNestedGraph(d.nodes, groupPath, ordered, v.edges),
           edges: d.edges,
         };
       });
@@ -246,10 +248,21 @@ function GraphWorkspaceInner() {
     );
   }, []);
 
-  const flowNodes = useMemo(
-    () => view.nodes.filter((n) => visibleTypes.has(n.data.nodeType)),
-    [view.nodes, visibleTypes]
-  );
+  const flowNodes = useMemo(() => {
+    const filtered = view.nodes.filter((n) => visibleTypes.has(n.data.nodeType));
+    const byId = new Map(filtered.map((n) => [n.id, n]));
+    for (const n of filtered) {
+      let pid: string | undefined = n.parentId;
+      while (pid) {
+        if (byId.has(pid)) break;
+        const p = view.nodes.find((x) => x.id === pid);
+        if (!p) break;
+        byId.set(p.id, p);
+        pid = p.parentId;
+      }
+    }
+    return sortParentsBeforeChildren([...byId.values()]);
+  }, [view.nodes, visibleTypes]);
 
   const flowEdges = useMemo(() => {
     const byId = new Map(view.nodes.map((n) => [n.id, n]));
