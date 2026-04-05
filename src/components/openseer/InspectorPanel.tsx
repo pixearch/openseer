@@ -31,10 +31,114 @@ const textareaClass = `${inputClass} min-h-[72px] resize-y font-mono text-xs lea
 interface InspectorPanelProps {
   selectedNode: Node<OpenSeerNodeData> | null;
   selectedEdge: Edge<OpenSeerEdgeData> | null;
+  multiSelectedNodes: Node<OpenSeerNodeData>[];
+  viewNodes: Node<OpenSeerNodeData>[];
   onPatchNode: (id: string, patch: Partial<OpenSeerNodeData>) => void;
   onPatchEdge: (id: string, next: OpenSeerEdgeData) => void;
   onDeleteNode: (id: string) => void;
   onDeleteEdge: (id: string) => void;
+}
+
+/** Child entries in stored order (nested graph array, or view node list order for frames). */
+function containedChildEntries(
+  node: Node<OpenSeerNodeData>,
+  viewNodes: Node<OpenSeerNodeData>[]
+): { id: string; title: string }[] {
+  if (node.data.nodeType === "group") {
+    const nested = (node.data.nestedGraph?.nodes ?? []) as Node<OpenSeerNodeData>[];
+    return nested.map((n) => ({ id: n.id, title: n.data.title }));
+  }
+  if (node.data.nodeType === "frame") {
+    return viewNodes
+      .filter((n) => n.parentId === node.id)
+      .map((n) => ({ id: n.id, title: n.data.title }));
+  }
+  return [];
+}
+
+function InspectorMultiSelectionList({ nodes }: { nodes: Node<OpenSeerNodeData>[] }) {
+  return (
+    <aside className="flex h-full w-[340px] shrink-0 flex-col border-l border-zinc-800 bg-zinc-950/95">
+      <div className="border-b border-zinc-800 px-4 py-3">
+        <h2 className="text-sm font-semibold text-zinc-100">Multiple selection</h2>
+        <p className="mt-0.5 text-xs text-zinc-500">{nodes.length} nodes</p>
+      </div>
+      <div className="flex flex-1 flex-col overflow-y-auto p-4 pb-8">
+        <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500">Selected</p>
+        <ol className="list-decimal space-y-1.5 pl-4 text-sm text-zinc-200">
+          {nodes.map((n) => (
+            <li key={n.id} className="truncate" title={n.data.title}>
+              {n.data.title}
+            </li>
+          ))}
+        </ol>
+      </div>
+    </aside>
+  );
+}
+
+function InspectorGroupedContainer({
+  node,
+  viewNodes,
+  onPatchNode,
+  onDeleteNode,
+}: {
+  node: Node<OpenSeerNodeData>;
+  viewNodes: Node<OpenSeerNodeData>[];
+  onPatchNode: (id: string, patch: Partial<OpenSeerNodeData>) => void;
+  onDeleteNode: (id: string) => void;
+}) {
+  const id = node.id;
+  const scheduleNodePatch = useDebouncedPatchNode(id, onPatchNode);
+  const [title, setTitle] = useState(node.data.title);
+
+  const heading =
+    node.data.nodeType === "frame" ? "Group nodes" : node.data.nodeType === "group" ? "Grouping" : "Container";
+  const children = containedChildEntries(node, viewNodes);
+
+  return (
+    <aside className="flex h-full w-[340px] shrink-0 flex-col border-l border-zinc-800 bg-zinc-950/95">
+      <div className="border-b border-zinc-800 px-4 py-3">
+        <h2 className="text-sm font-semibold text-zinc-100">{heading}</h2>
+        <p className="mt-0.5 truncate text-xs text-zinc-500" title={title}>
+          {title}
+        </p>
+      </div>
+      <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4 pb-8">
+        <Field label="Title">
+          <input
+            className={inputClass}
+            value={title}
+            onChange={(e) => {
+              const v = e.target.value;
+              setTitle(v);
+              scheduleNodePatch({ title: v });
+            }}
+          />
+        </Field>
+        <hr className="border-zinc-800" />
+        <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Contained nodes</p>
+        {children.length === 0 ? (
+          <p className="text-sm text-zinc-600">None</p>
+        ) : (
+          <ol className="list-decimal space-y-1.5 pl-4 text-sm text-zinc-200">
+            {children.map((c) => (
+              <li key={c.id} className="truncate" title={c.title}>
+                {c.title}
+              </li>
+            ))}
+          </ol>
+        )}
+        <button
+          type="button"
+          className="mt-auto rounded border border-rose-900/60 bg-rose-950/40 px-3 py-2 text-sm text-rose-200 hover:bg-rose-950/70"
+          onClick={() => onDeleteNode(id)}
+        >
+          Delete node
+        </button>
+      </div>
+    </aside>
+  );
 }
 
 function InspectorNodeEditor({
@@ -385,26 +489,6 @@ function InspectorNodeEditor({
           </>
         ) : null}
 
-        {draft.nodeType === "frame" ? (
-          <>
-            <hr className="border-zinc-800" />
-            <p className="text-xs text-zinc-500">
-              Drag to move grouped nodes together. Resize to change the box; nodes stay inside. Right-click for
-              &quot;Ungroup all&quot; or right-click a child for &quot;Ungroup node&quot;.
-            </p>
-          </>
-        ) : null}
-
-        {draft.nodeType === "group" ? (
-          <>
-            <hr className="border-zinc-800" />
-            <p className="text-xs text-zinc-500">
-              Name uses <strong className="text-zinc-400">Title</strong> above. Double-click this node on the
-              canvas to edit the nested graph.
-            </p>
-          </>
-        ) : null}
-
         {draft.nodeType === "decision" ? (
           <>
             <hr className="border-zinc-800" />
@@ -451,11 +535,17 @@ function InspectorNodeEditor({
 export function InspectorPanel({
   selectedNode,
   selectedEdge,
+  multiSelectedNodes,
+  viewNodes,
   onPatchNode,
   onPatchEdge,
   onDeleteNode,
   onDeleteEdge,
 }: InspectorPanelProps) {
+  if (multiSelectedNodes.length > 1) {
+    return <InspectorMultiSelectionList nodes={multiSelectedNodes} />;
+  }
+
   if (selectedEdge && !selectedNode) {
     const d = selectedEdge.data ?? { label: "relates_to", relationshipType: "relates_to" };
     return (
@@ -502,16 +592,18 @@ export function InspectorPanel({
   }
 
   if (!selectedNode) {
+    return null;
+  }
+
+  if (selectedNode.data.nodeType === "group" || selectedNode.data.nodeType === "frame") {
     return (
-      <aside className="flex h-full w-[340px] shrink-0 flex-col border-l border-zinc-800 bg-zinc-950/95">
-        <div className="border-b border-zinc-800 px-4 py-3">
-          <h2 className="text-sm font-semibold text-zinc-100">Inspector</h2>
-          <p className="mt-0.5 text-xs text-zinc-500">Select a node or edge</p>
-        </div>
-        <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-zinc-600">
-          Click any node to view and edit properties. Select an edge to edit its label.
-        </div>
-      </aside>
+      <InspectorGroupedContainer
+        key={selectedNode.id}
+        node={selectedNode}
+        viewNodes={viewNodes}
+        onPatchNode={onPatchNode}
+        onDeleteNode={onDeleteNode}
+      />
     );
   }
 

@@ -122,10 +122,11 @@ function GraphWorkspaceInner() {
   const [visibleTypes, setVisibleTypes] = useState<Set<OpenSeerNodeType>>(
     () => new Set(GRAPH_WORKSPACE_NODE_TYPE_LIST)
   );
-  const [selection, setSelection] = useState<{ nodeId: string | null; edgeId: string | null }>({
-    nodeId: null,
-    edgeId: null,
-  });
+  const [selection, setSelection] = useState<{
+    nodeId: string | null;
+    edgeId: string | null;
+    multiNodeIds: string[] | null;
+  }>({ nodeId: null, edgeId: null, multiNodeIds: null });
 
   const groupPathKey = groupPath.join("|");
 
@@ -283,29 +284,43 @@ function GraphWorkspaceInner() {
 
   const onSelectionChange = useCallback(
     ({ nodes: sn, edges: se }: { nodes: Node[]; edges: Edge[] }) => {
-      if (sn.length === 1) {
-        setSelection({ nodeId: sn[0].id, edgeId: null });
+      if (sn.length > 1) {
+        setSelection({
+          nodeId: null,
+          edgeId: null,
+          multiNodeIds: sn.map((n) => n.id),
+        });
+      } else if (sn.length === 1) {
+        setSelection({ nodeId: sn[0].id, edgeId: null, multiNodeIds: null });
       } else if (se.length === 1) {
-        setSelection({ nodeId: null, edgeId: se[0].id });
+        setSelection({ nodeId: null, edgeId: se[0].id, multiNodeIds: null });
       } else {
-        setSelection({ nodeId: null, edgeId: null });
+        setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
       }
     },
     []
   );
 
   const onNodesDelete = useCallback((deleted: Node<OpenSeerNodeData>[]) => {
-    setSelection((s) =>
-      s.nodeId && deleted.some((n) => n.id === s.nodeId)
-        ? { nodeId: null, edgeId: null }
-        : s
-    );
+    setSelection((s) => {
+      const cleared = { nodeId: null, edgeId: null, multiNodeIds: null as string[] | null };
+      if (s.nodeId && deleted.some((n) => n.id === s.nodeId)) return cleared;
+      if (s.multiNodeIds?.length) {
+        const next = s.multiNodeIds.filter((id) => !deleted.some((n) => n.id === id));
+        if (next.length !== s.multiNodeIds.length) {
+          if (next.length > 1) return { ...s, multiNodeIds: next };
+          if (next.length === 1) return { nodeId: next[0], edgeId: null, multiNodeIds: null };
+          return cleared;
+        }
+      }
+      return s;
+    });
   }, []);
 
   const onEdgesDelete = useCallback((deleted: Edge<OpenSeerEdgeData>[]) => {
     setSelection((s) =>
       s.edgeId && deleted.some((e) => e.id === s.edgeId)
-        ? { nodeId: null, edgeId: null }
+        ? { nodeId: null, edgeId: null, multiNodeIds: null }
         : s
     );
   }, []);
@@ -349,6 +364,14 @@ function GraphWorkspaceInner() {
     () => view.edges.find((e) => e.id === selection.edgeId) ?? null,
     [view.edges, selection.edgeId]
   );
+
+  const multiSelectedNodes = useMemo(() => {
+    if (!selection.multiNodeIds?.length) return [] as Node<OpenSeerNodeData>[];
+    const byId = new Map(view.nodes.map((n) => [n.id, n]));
+    return selection.multiNodeIds
+      .map((id) => byId.get(id))
+      .filter((n): n is Node<OpenSeerNodeData> => n !== undefined);
+  }, [view.nodes, selection.multiNodeIds]);
 
   const onPatchNode = useCallback(
     (id: string, patch: Partial<OpenSeerNodeData>) => {
@@ -394,7 +417,7 @@ function GraphWorkspaceInner() {
           edges: d.edges,
         };
       });
-      setSelection({ nodeId: null, edgeId: null });
+      setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
     },
     [groupPath]
   );
@@ -410,7 +433,7 @@ function GraphWorkspaceInner() {
           edges: d.edges,
         };
       });
-      setSelection({ nodeId: null, edgeId: null });
+      setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
     },
     [groupPath]
   );
@@ -433,7 +456,7 @@ function GraphWorkspaceInner() {
     setDoc({ nodes: clampFrameChildrenEverywhere(seed.nodes), edges: seed.edges });
     setGraphMeta({ id: SEED_GRAPH_ID, name: SEED_GRAPH_NAME });
     setGroupPath([]);
-    setSelection({ nodeId: null, edgeId: null });
+    setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
     initialFitDone.current = false;
     window.setTimeout(() => fitView({ padding: 0.12, maxZoom: 1.15, duration: 200 }), 60);
   }, [fitView]);
@@ -443,7 +466,7 @@ function GraphWorkspaceInner() {
     setDoc({ nodes: [], edges: [] });
     setGraphMeta({ id, name: "Untitled graph" });
     setGroupPath([]);
-    setSelection({ nodeId: null, edgeId: null });
+    setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
   }, []);
 
   const onAddNodeAt = useCallback(
@@ -555,7 +578,7 @@ function GraphWorkspaceInner() {
     (_e, node) => {
       if (node.data.nodeType === "group") {
         setGroupPath((p) => [...p, node.id]);
-        setSelection({ nodeId: null, edgeId: null });
+        setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
         initialFitDone.current = false;
       }
     },
@@ -847,6 +870,8 @@ function GraphWorkspaceInner() {
         <InspectorPanel
           selectedNode={selectedNode}
           selectedEdge={selectedEdge}
+          multiSelectedNodes={multiSelectedNodes}
+          viewNodes={view.nodes}
           onPatchNode={onPatchNode}
           onPatchEdge={onPatchEdge}
           onDeleteNode={onDeleteNode}
