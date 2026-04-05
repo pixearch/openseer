@@ -6,6 +6,7 @@ import {
   NODE_STANDARD_HEIGHT,
   NODE_STANDARD_WIDTH,
 } from "@/lib/default-node";
+import { FRAME_HEADER_RESERVE_PX } from "@/lib/graph/frame-chrome";
 import type { OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
 
 export function getViewGraph(
@@ -93,6 +94,56 @@ function sizeOf(n: Node<OpenSeerNodeData>): { w: number; h: number } {
         ? GROUP_STANDARD_HEIGHT
         : NODE_STANDARD_HEIGHT;
   return { w, h };
+}
+
+function clampScalar(v: number, lo: number, hi: number): number {
+  return Math.min(Math.max(v, lo), hi);
+}
+
+/** Keeps nodes parented under a frame below the header and inside the frame bounds. */
+export function clampFrameChildrenPositions(
+  nodes: Node<OpenSeerNodeData>[]
+): Node<OpenSeerNodeData>[] {
+  let changed = false;
+  const out = nodes.map((node) => {
+    if (!node.parentId) return node;
+    const parent = nodes.find((p) => p.id === node.parentId);
+    if (!parent || parent.data.nodeType !== "frame") return node;
+    const { w: pw, h: ph } = sizeOf(parent);
+    const { w: nw, h: nh } = sizeOf(node);
+    const minY = FRAME_HEADER_RESERVE_PX;
+    const maxX = Math.max(0, pw - nw);
+    const maxY = Math.max(minY, ph - nh);
+    const x = clampScalar(node.position.x, 0, maxX);
+    const y = clampScalar(node.position.y, minY, maxY);
+    if (x === node.position.x && y === node.position.y) return node;
+    changed = true;
+    return { ...node, position: { x, y } };
+  });
+  return changed ? out : nodes;
+}
+
+/** Applies {@link clampFrameChildrenPositions} at every graph level (root and inside group subgraphs). */
+export function clampFrameChildrenEverywhere(
+  nodes: Node<OpenSeerNodeData>[]
+): Node<OpenSeerNodeData>[] {
+  const top = clampFrameChildrenPositions(nodes);
+  let any = top !== nodes;
+  const mapped = top.map((n) => {
+    if (n.data.nodeType !== "group" || !n.data.nestedGraph?.nodes?.length) return n;
+    const inner = n.data.nestedGraph.nodes as Node<OpenSeerNodeData>[];
+    const nextInner = clampFrameChildrenEverywhere(inner);
+    if (nextInner === inner) return n;
+    any = true;
+    return {
+      ...n,
+      data: {
+        ...n.data,
+        nestedGraph: { ...n.data.nestedGraph!, nodes: nextInner },
+      },
+    };
+  });
+  return any ? mapped : nodes;
 }
 
 function absPos(
@@ -216,16 +267,29 @@ export function groupSelectedNodes(
 
   const reparented = selected.map((n) => {
     const a = absPos(viewNodes, n);
+    const { w: nw, h: nh } = sizeOf(n);
+    const relX = a.x - framePos.x;
+    let relY = a.y - framePos.y;
+    relY = Math.max(relY, FRAME_HEADER_RESERVE_PX);
+    const maxX = Math.max(0, frameW - nw);
+    const maxY = Math.max(FRAME_HEADER_RESERVE_PX, frameH - nh);
     return {
       ...n,
       parentId: frameId,
       extent: "parent" as const,
       zIndex: 1,
-      position: { x: a.x - framePos.x, y: a.y - framePos.y },
+      position: {
+        x: clampScalar(relX, 0, maxX),
+        y: clampScalar(relY, FRAME_HEADER_RESERVE_PX, maxY),
+      },
     };
   });
 
-  return { nodes: [...pushed, frameNode, ...reparented], edges: viewEdges };
+  const merged = [...pushed, frameNode, ...reparented];
+  return {
+    nodes: clampFrameChildrenPositions(merged),
+    edges: viewEdges,
+  };
 }
 
 /** Removes a frame node and places its children at absolute positions on the canvas. */

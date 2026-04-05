@@ -32,6 +32,8 @@ import {
   NODE_STANDARD_WIDTH,
 } from "@/lib/default-node";
 import {
+  clampFrameChildrenEverywhere,
+  clampFrameChildrenPositions,
   getViewGraph,
   groupSelectedNodes,
   patchNestedGraph,
@@ -111,13 +113,16 @@ function GraphWorkspaceInner() {
       const saved = loadGraphDocument();
       if (saved) {
         setDoc({
-          nodes: saved.nodes as Node<OpenSeerNodeData>[],
+          nodes: clampFrameChildrenEverywhere(saved.nodes as Node<OpenSeerNodeData>[]),
           edges: saved.edges as Edge<OpenSeerEdgeData>[],
         });
         setGraphMeta({ id: saved.id, name: saved.name });
       } else {
         const seed = createGitOnboardingSeed();
-        setDoc({ nodes: seed.nodes, edges: seed.edges });
+        setDoc({
+          nodes: clampFrameChildrenEverywhere(seed.nodes),
+          edges: seed.edges,
+        });
         setGraphMeta({ id: SEED_GRAPH_ID, name: SEED_GRAPH_NAME });
         saveGraphDocument(
           documentFromState(SEED_GRAPH_NAME, SEED_GRAPH_ID, seed.nodes, seed.edges)
@@ -164,9 +169,10 @@ function GraphWorkspaceInner() {
       setDoc((d) => {
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const nn = applyNodeChanges(changes, v.nodes);
-        if (groupPath.length === 0) return { nodes: nn, edges: d.edges };
+        const clamped = clampFrameChildrenPositions(nn);
+        if (groupPath.length === 0) return { nodes: clamped, edges: d.edges };
         return {
-          nodes: patchNestedGraph(d.nodes, groupPath, nn, v.edges),
+          nodes: patchNestedGraph(d.nodes, groupPath, clamped, v.edges),
           edges: d.edges,
         };
       });
@@ -349,7 +355,7 @@ function GraphWorkspaceInner() {
 
   const onLoadDemo = useCallback(() => {
     const seed = createGitOnboardingSeed();
-    setDoc({ nodes: seed.nodes, edges: seed.edges });
+    setDoc({ nodes: clampFrameChildrenEverywhere(seed.nodes), edges: seed.edges });
     setGraphMeta({ id: SEED_GRAPH_ID, name: SEED_GRAPH_NAME });
     setGroupPath([]);
     setSelection({ nodeId: null, edgeId: null });

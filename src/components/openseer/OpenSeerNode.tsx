@@ -23,6 +23,7 @@ import {
   NODE_STANDARD_HEIGHT,
   NODE_STANDARD_WIDTH,
 } from "@/lib/default-node";
+import { FRAME_HEADER_RESERVE_PX } from "@/lib/graph/frame-chrome";
 import {
   minimapColorForNodeType,
   NODE_TYPE_ACCENT_CLASS,
@@ -159,7 +160,10 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           position={Position.Left}
           className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
         />
-        <div className="shrink-0 border-b border-slate-800/80 bg-slate-950/50 px-2 py-1.5">
+        <div
+          className="box-border flex shrink-0 flex-col justify-center gap-0.5 overflow-hidden border-b border-slate-800/80 bg-slate-950/50 px-2 py-1 leading-tight"
+          style={{ height: FRAME_HEADER_RESERVE_PX }}
+        >
           <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
             {typeLabel}
           </span>
