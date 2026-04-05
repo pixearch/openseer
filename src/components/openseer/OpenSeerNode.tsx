@@ -161,7 +161,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         />
         <div
           className={[
-            "overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
+            "flex min-h-0 flex-col overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
             "border-l-[3px]",
             accent,
             selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
@@ -179,7 +179,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             position={Position.Left}
             className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
           />
-          <div className="flex items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
             <div className="min-w-0 flex-1">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
                 {typeLabel}
@@ -197,7 +197,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           {data.imageUrl ? (
             <button
               type="button"
-              className="block w-full cursor-zoom-in focus:outline-none"
+              className="flex min-h-0 w-full flex-1 cursor-zoom-in items-center justify-center bg-zinc-950 focus:outline-none"
               onClick={() => setLightbox(true)}
               onDragOver={onImageDragOver}
               onDrop={onImageDrop}
@@ -206,12 +206,12 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
               <img
                 src={data.imageUrl}
                 alt=""
-                className="h-28 w-full object-cover"
+                className="max-h-full max-w-full object-contain"
               />
             </button>
           ) : (
             <div
-              className="flex h-28 flex-col items-center justify-center gap-1 bg-zinc-950 px-2 text-center text-xs text-zinc-600"
+              className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 bg-zinc-950 px-2 text-center text-xs text-zinc-600"
               onDragOver={onImageDragOver}
               onDrop={onImageDrop}
             >
