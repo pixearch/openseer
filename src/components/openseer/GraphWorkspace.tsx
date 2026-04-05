@@ -20,18 +20,26 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { Connection, Edge, EdgeChange, Node, NodeChange, NodeMouseHandler } from "@xyflow/react";
+import { GraphSidebar } from "@/components/openseer/GraphSidebar";
+import { InspectorPanel } from "@/components/openseer/InspectorPanel";
+import { OpenSeerNode } from "@/components/openseer/OpenSeerNode";
 import { createGitOnboardingSeed, SEED_GRAPH_ID, SEED_GRAPH_NAME } from "@/data/seed-git-onboarding";
 import { createEmptyNodeData } from "@/lib/default-node";
+import {
+  getViewGraph,
+  groupSelectedNodes,
+  patchNestedGraph,
+  titlesAlongPath,
+} from "@/lib/graph/nested-graph";
+import { minimapColorForNodeType } from "@/lib/node-type-meta";
 import {
   documentFromState,
   loadGraphDocument,
   saveGraphDocument,
 } from "@/lib/services/graph-storage";
+import { clampFixedMenuPosition } from "@/lib/ui/clamp-context-menu";
 import type { OpenSeerEdgeData, OpenSeerNodeData, OpenSeerNodeType } from "@/lib/types/graph";
 import { OPEN_SEER_NODE_TYPES } from "@/lib/types/graph";
-import { GraphSidebar } from "@/components/openseer/GraphSidebar";
-import { InspectorPanel } from "@/components/openseer/InspectorPanel";
-import { OpenSeerNode } from "@/components/openseer/OpenSeerNode";
 
 const nodeTypes = { openSeer: OpenSeerNode };
 
@@ -41,141 +49,9 @@ const defaultEdgeOptions = {
   style: { stroke: "#64748b", strokeWidth: 1.5 },
 };
 
-function getViewGraph(
-  rootNodes: Node<OpenSeerNodeData>[],
-  rootEdges: Edge<OpenSeerEdgeData>[],
-  path: string[]
-): { nodes: Node<OpenSeerNodeData>[]; edges: Edge<OpenSeerEdgeData>[] } {
-  if (path.length === 0) return { nodes: rootNodes, edges: rootEdges };
-  let nodes = rootNodes;
-  let edges = rootEdges;
-  for (const id of path) {
-    const gn = nodes.find((x) => x.id === id);
-    if (!gn || gn.data.nodeType !== "group") return { nodes: [], edges: [] };
-    const ng = gn.data.nestedGraph ?? { nodes: [], edges: [] };
-    nodes = ng.nodes as Node<OpenSeerNodeData>[];
-    edges = ng.edges as Edge<OpenSeerEdgeData>[];
-  }
-  return { nodes, edges };
-}
-
-function patchNestedGraph(
-  nodes: Node<OpenSeerNodeData>[],
-  path: string[],
-  nextNodes: Node<OpenSeerNodeData>[],
-  nextEdges: Edge<OpenSeerEdgeData>[]
-): Node<OpenSeerNodeData>[] {
-  if (path.length === 0) return nextNodes;
-  const [head, ...tail] = path;
-  return nodes.map((n) => {
-    if (n.id !== head) return n;
-    const ng = (n.data.nestedGraph ?? { nodes: [], edges: [] }) as {
-      nodes: Node<OpenSeerNodeData>[];
-      edges: Edge<OpenSeerEdgeData>[];
-    };
-    if (tail.length === 0) {
-      return {
-        ...n,
-        data: {
-          ...n.data,
-          nestedGraph: { nodes: nextNodes, edges: nextEdges },
-        },
-      };
-    }
-    return {
-      ...n,
-      data: {
-        ...n.data,
-        nestedGraph: {
-          nodes: patchNestedGraph(ng.nodes, tail, nextNodes, nextEdges),
-          edges: ng.edges,
-        },
-      },
-    };
-  });
-}
-
-function titlesAlongPath(
-  rootNodes: Node<OpenSeerNodeData>[],
-  path: string[]
-): string[] {
-  const titles: string[] = [];
-  let nodes = rootNodes;
-  for (const id of path) {
-    const n = nodes.find((x) => x.id === id);
-    if (!n) break;
-    titles.push(n.data.title);
-    if (n.data.nodeType === "group" && n.data.nestedGraph) {
-      nodes = n.data.nestedGraph.nodes as Node<OpenSeerNodeData>[];
-    }
-  }
-  return titles;
-}
-
-function groupSelectedNodes(
-  viewNodes: Node<OpenSeerNodeData>[],
-  viewEdges: Edge<OpenSeerEdgeData>[],
-  selectedIds: string[]
-): { nodes: Node<OpenSeerNodeData>[]; edges: Edge<OpenSeerEdgeData>[] } | null {
-  if (selectedIds.length < 2) return null;
-  const set = new Set(selectedIds);
-  const selected = viewNodes.filter((n) => set.has(n.id));
-  if (selected.length < 2) return null;
-  const xs = selected.map((n) => n.position.x);
-  const ys = selected.map((n) => n.position.y);
-  const minX = Math.min(...xs);
-  const minY = Math.min(...ys);
-  const maxX = Math.max(...xs);
-  const maxY = Math.max(...ys);
-  const padX = 48;
-  const padY = 56;
-  const innerW = maxX - minX + 240;
-  const innerH = maxY - minY + 120;
-  const gid = `n-${crypto.randomUUID()}`;
-  const nestedNodes = selected.map((n) => ({
-    ...n,
-    position: { x: n.position.x - minX + padX, y: n.position.y - minY + padY },
-  }));
-  const nestedEdges = viewEdges
-    .filter((e) => set.has(e.source) && set.has(e.target))
-    .map((e) => ({ ...e, id: `e-${crypto.randomUUID().slice(0, 12)}` }));
-  const groupNode: Node<OpenSeerNodeData> = {
-    id: gid,
-    type: "openSeer",
-    position: { x: minX - padX, y: minY - padY },
-    style: { width: Math.max(innerW + padX * 2, 320), height: Math.max(innerH + padY, 200) },
-    data: {
-      ...createEmptyNodeData("group"),
-      title: "Group",
-      nestedGraph: { nodes: nestedNodes, edges: nestedEdges },
-    },
-  };
-  const remainingNodes = viewNodes.filter((n) => !set.has(n.id));
-  const remainingEdges = viewEdges.filter((e) => !set.has(e.source) && !set.has(e.target));
-  return { nodes: [...remainingNodes, groupNode], edges: remainingEdges };
-}
-
-function minimapNodeColor(n: Node<OpenSeerNodeData>) {
-  const t = n.data?.nodeType;
-  const map: Partial<Record<OpenSeerNodeType, string>> = {
-    proposal: "#8b5cf6",
-    program: "#3b82f6",
-    project: "#06b6d4",
-    epic: "#14b8a6",
-    sprint: "#10b981",
-    task: "#22c55e",
-    step: "#f59e0b",
-    howto: "#0ea5e9",
-    evidence: "#f97316",
-    risk: "#f43f5e",
-    cost: "#ca8a04",
-    decision: "#6366f1",
-    image: "#a78bfa",
-    video: "#38bdf8",
-    group: "#22d3ee",
-  };
-  return map[t ?? "task"] ?? "#52525b";
-}
+const CTX_MENU_W = 208;
+const CTX_MENU_H_PANE = 420;
+const CTX_MENU_H_NODES = 140;
 
 type CtxMenu =
   | {
@@ -359,20 +235,19 @@ function GraphWorkspaceInner() {
     [view.nodes, visibleTypes]
   );
 
-  const flowEdges = useMemo(
-    () =>
-      view.edges.filter((e) => {
-        const s = view.nodes.find((n) => n.id === e.source);
-        const t = view.nodes.find((n) => n.id === e.target);
-        return (
-          !!s &&
-          !!t &&
-          visibleTypes.has(s.data.nodeType) &&
-          visibleTypes.has(t.data.nodeType)
-        );
-      }),
-    [view.edges, view.nodes, visibleTypes]
-  );
+  const flowEdges = useMemo(() => {
+    const byId = new Map(view.nodes.map((n) => [n.id, n]));
+    return view.edges.filter((e) => {
+      const s = byId.get(e.source);
+      const t = byId.get(e.target);
+      return (
+        s !== undefined &&
+        t !== undefined &&
+        visibleTypes.has(s.data.nodeType) &&
+        visibleTypes.has(t.data.nodeType)
+      );
+    });
+  }, [view.edges, view.nodes, visibleTypes]);
 
   const selectedNode = useMemo(
     () => view.nodes.find((n) => n.id === selection.nodeId) ?? null,
@@ -679,7 +554,7 @@ function GraphWorkspaceInner() {
         <MiniMap
           className="!m-3 !rounded-md !border !border-zinc-700 !bg-zinc-900/90"
           nodeStrokeWidth={2}
-          nodeColor={minimapNodeColor}
+          nodeColor={(n) => minimapColorForNodeType((n as Node<OpenSeerNodeData>).data?.nodeType)}
           maskColor="rgb(12, 12, 14, 0.85)"
         />
       </ReactFlow>
@@ -693,7 +568,16 @@ function GraphWorkspaceInner() {
           />
           <div
             className="fixed z-50 max-h-[min(70vh,360px)] w-52 overflow-y-auto rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
-            style={{ left: ctxMenu.clientX, top: ctxMenu.clientY }}
+            style={(() => {
+              const h = ctxMenu.kind === "pane" ? CTX_MENU_H_PANE : CTX_MENU_H_NODES;
+              const { left, top } = clampFixedMenuPosition(
+                ctxMenu.clientX,
+                ctxMenu.clientY,
+                CTX_MENU_W,
+                h
+              );
+              return { left, top };
+            })()}
           >
             {ctxMenu.kind === "pane" ? (
               OPEN_SEER_NODE_TYPES.map((t) => (

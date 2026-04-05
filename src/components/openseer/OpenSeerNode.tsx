@@ -3,43 +3,8 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import { memo, useState } from "react";
 import { createPortal } from "react-dom";
-import type { OpenSeerNodeData, OpenSeerNodeType } from "@/lib/types/graph";
-
-const TYPE_LABEL: Record<OpenSeerNodeType, string> = {
-  proposal: "Proposal",
-  program: "Program",
-  project: "Project",
-  epic: "Epic",
-  sprint: "Sprint",
-  task: "Task",
-  step: "Step",
-  howto: "How-To",
-  evidence: "Evidence",
-  risk: "Risk",
-  cost: "Cost",
-  decision: "Decision",
-  image: "Image",
-  video: "Video",
-  group: "Group",
-};
-
-const ACCENT: Record<OpenSeerNodeType, string> = {
-  proposal: "border-l-violet-500",
-  program: "border-l-blue-500",
-  project: "border-l-cyan-500",
-  epic: "border-l-teal-500",
-  sprint: "border-l-emerald-500",
-  task: "border-l-green-500",
-  step: "border-l-amber-500",
-  howto: "border-l-sky-500",
-  evidence: "border-l-orange-500",
-  risk: "border-l-rose-500",
-  cost: "border-l-yellow-600",
-  decision: "border-l-indigo-500",
-  image: "border-l-fuchsia-500",
-  video: "border-l-cyan-400",
-  group: "border-l-teal-400",
-};
+import { NODE_TYPE_ACCENT_CLASS, NODE_TYPE_LABEL } from "@/lib/node-type-meta";
+import type { OpenSeerNodeData } from "@/lib/types/graph";
 
 const STATUS_DOT: Record<string, string> = {
   draft: "bg-zinc-500",
@@ -55,8 +20,8 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   const h = typeof props.height === "number" ? props.height : undefined;
   const [lightbox, setLightbox] = useState(false);
 
-  const accent = ACCENT[data.nodeType];
-  const typeLabel = TYPE_LABEL[data.nodeType];
+  const accent = NODE_TYPE_ACCENT_CLASS[data.nodeType];
+  const typeLabel = NODE_TYPE_LABEL[data.nodeType];
   const statusClass = STATUS_DOT[data.status] ?? "bg-zinc-500";
 
   const previewTags = data.tags.slice(0, 2);

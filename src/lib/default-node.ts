@@ -1,22 +1,7 @@
 import type { OpenSeerNodeData, OpenSeerNodeType } from "@/lib/types/graph";
+import { DEFAULT_TITLE_BY_TYPE } from "@/lib/node-type-meta";
 
-export const DEFAULT_TITLE_BY_TYPE: Record<OpenSeerNodeType, string> = {
-  proposal: "New proposal",
-  program: "New program",
-  project: "New project",
-  epic: "New epic",
-  sprint: "New sprint",
-  task: "New task",
-  step: "New step",
-  howto: "New how-to",
-  evidence: "New evidence",
-  risk: "New risk",
-  cost: "New cost",
-  decision: "New decision",
-  image: "New image",
-  video: "New video",
-  group: "New group",
-};
+export { DEFAULT_TITLE_BY_TYPE } from "@/lib/node-type-meta";
 
 export function createEmptyNodeData(nodeType: OpenSeerNodeType): OpenSeerNodeData {
   const base: OpenSeerNodeData = {
