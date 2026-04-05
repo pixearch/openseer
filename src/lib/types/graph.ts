@@ -1,5 +1,6 @@
-/** Semantic node kinds shown in the graph (maps to business ontology). */
+/** All node kinds (workspace + legacy stored graphs). */
 export const OPEN_SEER_NODE_TYPES = [
+  "text",
   "proposal",
   "program",
   "project",
@@ -20,10 +21,13 @@ export const OPEN_SEER_NODE_TYPES = [
 
 export type OpenSeerNodeType = (typeof OPEN_SEER_NODE_TYPES)[number];
 
-/** Add-node menus (sidebar, canvas); `frame` is only created via multi-select grouping. */
-export const ADD_NODE_MENU_TYPES: OpenSeerNodeType[] = OPEN_SEER_NODE_TYPES.filter(
-  (t) => t !== "frame"
-);
+/** Creation menu + visibility toggles in the graph workspace (four types only). */
+export const GRAPH_WORKSPACE_NODE_TYPE_LIST: OpenSeerNodeType[] = [
+  "text",
+  "image",
+  "video",
+  "group",
+];
 
 export const OPEN_SEER_STATUSES = [
   "draft",

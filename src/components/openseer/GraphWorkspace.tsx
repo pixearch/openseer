@@ -23,6 +23,7 @@ import type { Connection, Edge, EdgeChange, Node, NodeChange, NodeMouseHandler }
 import { GraphSidebar } from "@/components/openseer/GraphSidebar";
 import { InspectorPanel } from "@/components/openseer/InspectorPanel";
 import { OpenSeerNode } from "@/components/openseer/OpenSeerNode";
+import { RadialCreateNodeMenu } from "@/components/openseer/RadialCreateNodeMenu";
 import { createGitOnboardingSeed, SEED_GRAPH_ID, SEED_GRAPH_NAME } from "@/data/seed-git-onboarding";
 import {
   createEmptyNodeData,
@@ -42,7 +43,7 @@ import {
   ungroupFrame,
   ungroupNodeFromFrame,
 } from "@/lib/graph/nested-graph";
-import { minimapColorForNodeType, NODE_TYPE_LABEL } from "@/lib/node-type-meta";
+import { minimapColorForNodeType } from "@/lib/node-type-meta";
 import {
   documentFromState,
   loadGraphDocument,
@@ -50,7 +51,7 @@ import {
 } from "@/lib/services/graph-storage";
 import { clampFixedMenuPosition } from "@/lib/ui/clamp-context-menu";
 import type { OpenSeerEdgeData, OpenSeerNodeData, OpenSeerNodeType } from "@/lib/types/graph";
-import { ADD_NODE_MENU_TYPES, OPEN_SEER_NODE_TYPES } from "@/lib/types/graph";
+import { GRAPH_WORKSPACE_NODE_TYPE_LIST } from "@/lib/types/graph";
 
 const nodeTypes = { openSeer: OpenSeerNode };
 
@@ -61,8 +62,31 @@ const defaultEdgeOptions = {
 };
 
 const CTX_MENU_W = 208;
-const CTX_MENU_H_PANE = 400;
 const CTX_MENU_H_NODES = 220;
+
+const WORKSPACE_TYPE_SET = new Set<OpenSeerNodeType>(GRAPH_WORKSPACE_NODE_TYPE_LIST);
+
+function clampRadialMenuCenter(clientX: number, clientY: number): { left: number; top: number } {
+  const m = 16;
+  const halfW = 110;
+  const halfH = 150;
+  if (typeof window === "undefined") {
+    return { left: clientX, top: clientY };
+  }
+  return {
+    left: Math.min(Math.max(halfW + m, clientX), window.innerWidth - halfW - m),
+    top: Math.min(Math.max(halfH + m, clientY), window.innerHeight - halfH - m),
+  };
+}
+
+function isVisibleOnCanvas(
+  node: Node<OpenSeerNodeData>,
+  visibleTypes: Set<OpenSeerNodeType>
+): boolean {
+  const t = node.data.nodeType;
+  if (!WORKSPACE_TYPE_SET.has(t)) return true;
+  return visibleTypes.has(t);
+}
 
 type CtxMenu =
   | {
@@ -77,12 +101,13 @@ type CtxMenu =
       clientX: number;
       clientY: number;
       selectedIds: string[];
-      /** Node that was right-clicked (or first of a multi-selection). */
       anchorNodeId: string;
     };
 
 function GraphWorkspaceInner() {
   const flowAreaRef = useRef<HTMLDivElement>(null);
+  const graphPointerInside = useRef(false);
+  const lastGraphPointer = useRef({ x: 0, y: 0 });
   const { screenToFlowPosition, fitView, getNodes } = useReactFlow();
 
   const [ready, setReady] = useState(false);
@@ -95,7 +120,7 @@ function GraphWorkspaceInner() {
   const [focusMode, setFocusMode] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
   const [visibleTypes, setVisibleTypes] = useState<Set<OpenSeerNodeType>>(
-    () => new Set(OPEN_SEER_NODE_TYPES)
+    () => new Set(GRAPH_WORKSPACE_NODE_TYPE_LIST)
   );
   const [selection, setSelection] = useState<{ nodeId: string | null; edgeId: string | null }>({
     nodeId: null,
@@ -164,6 +189,43 @@ function GraphWorkspaceInner() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [focusMode]);
+
+  useEffect(() => {
+    if (!ctxMenu || ctxMenu.kind !== "pane") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "Space") e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey, { passive: false });
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ctxMenu]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return;
+      if (e.repeat) return;
+      const el = e.target;
+      if (
+        el instanceof HTMLElement &&
+        (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
+      ) {
+        return;
+      }
+      if (!graphPointerInside.current) return;
+      if (ctxMenu) return;
+      e.preventDefault();
+      const { x, y } = lastGraphPointer.current;
+      const p = screenToFlowPosition({ x, y });
+      setCtxMenu({
+        kind: "pane",
+        clientX: x,
+        clientY: y,
+        flowX: p.x,
+        flowY: p.y,
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ctxMenu, screenToFlowPosition]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<Node<OpenSeerNodeData>>[]) => {
@@ -249,7 +311,7 @@ function GraphWorkspaceInner() {
   }, []);
 
   const flowNodes = useMemo(() => {
-    const filtered = view.nodes.filter((n) => visibleTypes.has(n.data.nodeType));
+    const filtered = view.nodes.filter((n) => isVisibleOnCanvas(n, visibleTypes));
     const byId = new Map(filtered.map((n) => [n.id, n]));
     for (const n of filtered) {
       let pid: string | undefined = n.parentId;
@@ -272,8 +334,8 @@ function GraphWorkspaceInner() {
       return (
         s !== undefined &&
         t !== undefined &&
-        visibleTypes.has(s.data.nodeType) &&
-        visibleTypes.has(t.data.nodeType)
+        isVisibleOnCanvas(s, visibleTypes) &&
+        isVisibleOnCanvas(t, visibleTypes)
       );
     });
   }, [view.edges, view.nodes, visibleTypes]);
@@ -363,7 +425,7 @@ function GraphWorkspaceInner() {
   }, []);
 
   const onShowAllTypes = useCallback(() => {
-    setVisibleTypes(new Set(OPEN_SEER_NODE_TYPES));
+    setVisibleTypes(new Set(GRAPH_WORKSPACE_NODE_TYPE_LIST));
   }, []);
 
   const onLoadDemo = useCallback(() => {
@@ -462,8 +524,7 @@ function GraphWorkspaceInner() {
     (e, node) => {
       e.preventDefault();
       const sel = getNodes().filter((n) => n.selected);
-      const selectedIds =
-        sel.length > 0 ? sel.map((n) => n.id) : [node.id];
+      const selectedIds = sel.length > 0 ? sel.map((n) => n.id) : [node.id];
       setCtxMenu({
         kind: "nodes",
         clientX: e.clientX,
@@ -560,12 +621,25 @@ function GraphWorkspaceInner() {
 
   const crumbTitles = useMemo(() => titlesAlongPath(doc.nodes, groupPath), [doc.nodes, groupPath]);
 
+  const radialPos =
+    ctxMenu?.kind === "pane" ? clampRadialMenuCenter(ctxMenu.clientX, ctxMenu.clientY) : null;
+
   const flowColumn = (
     <div
       ref={flowAreaRef}
       className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[#0c0c0e]"
       onContextMenuCapture={onFlowContextMenuCapture}
       onContextMenu={onFlowContextMenu}
+      onPointerEnter={() => {
+        graphPointerInside.current = true;
+      }}
+      onPointerLeave={() => {
+        graphPointerInside.current = false;
+      }}
+      onPointerMove={(e) => {
+        graphPointerInside.current = true;
+        lastGraphPointer.current = { x: e.clientX, y: e.clientY };
+      }}
     >
       {focusMode ? (
         <div className="flex shrink-0 items-center justify-end border-b border-zinc-800 bg-zinc-950 px-2 py-1">
@@ -677,71 +751,71 @@ function GraphWorkspaceInner() {
             aria-label="Close menu"
             onClick={() => setCtxMenu(null)}
           />
-          <div
-            className="fixed z-50 max-h-[min(70vh,360px)] w-52 overflow-y-auto rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
-            style={(() => {
-              const h = ctxMenu.kind === "pane" ? CTX_MENU_H_PANE : CTX_MENU_H_NODES;
-              const { left, top } = clampFixedMenuPosition(
-                ctxMenu.clientX,
-                ctxMenu.clientY,
-                CTX_MENU_W,
-                h
-              );
-              return { left, top };
-            })()}
-          >
-            {ctxMenu.kind === "pane" ? (
-              ADD_NODE_MENU_TYPES.map((t) => (
+          {ctxMenu.kind === "pane" && radialPos ? (
+            <div
+              className="fixed z-50"
+              style={{
+                left: radialPos.left,
+                top: radialPos.top,
+                transform: "translate(-50%, -50%)",
+              }}
+            >
+              <RadialCreateNodeMenu
+                onPick={(t) => {
+                  onAddNodeAt(t, { x: ctxMenu.flowX, y: ctxMenu.flowY });
+                  setCtxMenu(null);
+                }}
+                onClose={() => setCtxMenu(null)}
+              />
+            </div>
+          ) : ctxMenu.kind === "nodes" ? (
+            <div
+              className="fixed z-50 max-h-[min(70vh,360px)] w-52 overflow-y-auto rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
+              style={(() => {
+                const { left, top } = clampFixedMenuPosition(
+                  ctxMenu.clientX,
+                  ctxMenu.clientY,
+                  CTX_MENU_W,
+                  CTX_MENU_H_NODES
+                );
+                return { left, top };
+              })()}
+            >
+              {ctxMenuAnchorNode?.data.nodeType === "frame" ? (
                 <button
-                  key={t}
                   type="button"
-                  className="block w-full px-3 py-1.5 text-left text-sm capitalize text-zinc-200 hover:bg-zinc-800"
-                  onClick={() => {
-                    onAddNodeAt(t, { x: ctxMenu.flowX, y: ctxMenu.flowY });
-                    setCtxMenu(null);
-                  }}
+                  className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                  onClick={runUngroupAll}
                 >
-                  {NODE_TYPE_LABEL[t]}
+                  Ungroup all
                 </button>
-              ))
-            ) : (
-              <>
-                {ctxMenuAnchorNode?.data.nodeType === "frame" ? (
-                  <button
-                    type="button"
-                    className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
-                    onClick={runUngroupAll}
-                  >
-                    Ungroup all
-                  </button>
-                ) : null}
-                {ctxMenuAnchorNode && ctxParentIsFrame ? (
-                  <button
-                    type="button"
-                    className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
-                    onClick={runUngroupNode}
-                  >
-                    Ungroup node
-                  </button>
-                ) : null}
-                {ctxMenu.selectedIds.length >= 2 &&
-                ctxMenuAnchorNode?.data.nodeType !== "frame" ? (
-                  <button
-                    type="button"
-                    className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
-                    onClick={runGroupSelection}
-                  >
-                    Group nodes
-                  </button>
-                ) : null}
-                <p className="px-3 py-1 text-[11px] text-zinc-600">
-                  {ctxMenu.selectedIds.length < 2
-                    ? "Select 2+ nodes (Shift-click) to group nodes together."
-                    : ""}
-                </p>
-              </>
-            )}
-          </div>
+              ) : null}
+              {ctxMenuAnchorNode && ctxParentIsFrame ? (
+                <button
+                  type="button"
+                  className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                  onClick={runUngroupNode}
+                >
+                  Ungroup node
+                </button>
+              ) : null}
+              {ctxMenu.selectedIds.length >= 2 &&
+              ctxMenuAnchorNode?.data.nodeType !== "frame" ? (
+                <button
+                  type="button"
+                  className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                  onClick={runGroupSelection}
+                >
+                  Group nodes
+                </button>
+              ) : null}
+              <p className="px-3 py-1 text-[11px] text-zinc-600">
+                {ctxMenu.selectedIds.length < 2
+                  ? "Select 2+ nodes (Shift-click) to group nodes together."
+                  : ""}
+              </p>
+            </div>
+          ) : null}
         </>
       ) : null}
     </div>
