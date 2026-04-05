@@ -36,6 +36,8 @@ import {
   groupSelectedNodes,
   patchNestedGraph,
   titlesAlongPath,
+  ungroupFrame,
+  ungroupNodeFromFrame,
 } from "@/lib/graph/nested-graph";
 import { minimapColorForNodeType, NODE_TYPE_LABEL } from "@/lib/node-type-meta";
 import {
@@ -57,7 +59,7 @@ const defaultEdgeOptions = {
 
 const CTX_MENU_W = 208;
 const CTX_MENU_H_PANE = 420;
-const CTX_MENU_H_NODES = 140;
+const CTX_MENU_H_NODES = 220;
 
 type CtxMenu =
   | {
@@ -72,6 +74,8 @@ type CtxMenu =
       clientX: number;
       clientY: number;
       selectedIds: string[];
+      /** Node that was right-clicked (or first of a multi-selection). */
+      anchorNodeId: string;
     };
 
 function GraphWorkspaceInner() {
@@ -446,6 +450,7 @@ function GraphWorkspaceInner() {
         clientX: e.clientX,
         clientY: e.clientY,
         selectedIds,
+        anchorNodeId: node.id,
       });
     },
     [getNodes]
@@ -460,6 +465,7 @@ function GraphWorkspaceInner() {
         clientX: e.clientX,
         clientY: e.clientY,
         selectedIds,
+        anchorNodeId: selectedIds[0] ?? "",
       });
     },
     []
@@ -491,6 +497,47 @@ function GraphWorkspaceInner() {
       };
     });
   }, [ctxMenu, groupPath]);
+
+  const runUngroupAll = useCallback(() => {
+    if (!ctxMenu || ctxMenu.kind !== "nodes") return;
+    const frameId = ctxMenu.anchorNodeId;
+    setCtxMenu(null);
+    setDoc((d) => {
+      const v = getViewGraph(d.nodes, d.edges, groupPath);
+      const u = ungroupFrame(v.nodes, v.edges, frameId);
+      if (!u) return d;
+      if (groupPath.length === 0) return { nodes: u.nodes, edges: u.edges };
+      return {
+        nodes: patchNestedGraph(d.nodes, groupPath, u.nodes, u.edges),
+        edges: d.edges,
+      };
+    });
+  }, [ctxMenu, groupPath]);
+
+  const runUngroupNode = useCallback(() => {
+    if (!ctxMenu || ctxMenu.kind !== "nodes") return;
+    const nodeId = ctxMenu.anchorNodeId;
+    setCtxMenu(null);
+    setDoc((d) => {
+      const v = getViewGraph(d.nodes, d.edges, groupPath);
+      const u = ungroupNodeFromFrame(v.nodes, v.edges, nodeId);
+      if (!u) return d;
+      if (groupPath.length === 0) return { nodes: u.nodes, edges: u.edges };
+      return {
+        nodes: patchNestedGraph(d.nodes, groupPath, u.nodes, u.edges),
+        edges: d.edges,
+      };
+    });
+  }, [ctxMenu, groupPath]);
+
+  const ctxMenuAnchorNode = useMemo(() => {
+    if (!ctxMenu || ctxMenu.kind !== "nodes") return null;
+    return view.nodes.find((n) => n.id === ctxMenu.anchorNodeId) ?? null;
+  }, [ctxMenu, view.nodes]);
+
+  const ctxParentIsFrame =
+    ctxMenuAnchorNode?.parentId != null &&
+    view.nodes.find((p) => p.id === ctxMenuAnchorNode.parentId)?.data.nodeType === "frame";
 
   const crumbTitles = useMemo(() => titlesAlongPath(doc.nodes, groupPath), [doc.nodes, groupPath]);
 
@@ -640,18 +687,37 @@ function GraphWorkspaceInner() {
               ))
             ) : (
               <>
-                {ctxMenu.selectedIds.length >= 2 ? (
+                {ctxMenuAnchorNode?.data.nodeType === "frame" ? (
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                    onClick={runUngroupAll}
+                  >
+                    Ungroup all
+                  </button>
+                ) : null}
+                {ctxMenuAnchorNode && ctxParentIsFrame ? (
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                    onClick={runUngroupNode}
+                  >
+                    Ungroup node
+                  </button>
+                ) : null}
+                {ctxMenu.selectedIds.length >= 2 &&
+                ctxMenuAnchorNode?.data.nodeType !== "frame" ? (
                   <button
                     type="button"
                     className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
                     onClick={runGroupSelection}
                   >
-                    Frame selection
+                    Group nodes
                   </button>
                 ) : null}
                 <p className="px-3 py-1 text-[11px] text-zinc-600">
                   {ctxMenu.selectedIds.length < 2
-                    ? "Select 2+ nodes (Shift-click) to frame together."
+                    ? "Select 2+ nodes (Shift-click) to group nodes together."
                     : ""}
                 </p>
               </>

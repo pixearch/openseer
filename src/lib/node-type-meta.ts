@@ -16,8 +16,8 @@ export const NODE_TYPE_LABEL: Record<OpenSeerNodeType, string> = {
   decision: "Decision",
   image: "Image",
   video: "Video",
-  frame: "Frame",
-  group: "Group",
+  frame: "Group Nodes",
+  group: "Grouping",
 };
 
 /** Left border accent (Tailwind classes) on canvas nodes */
@@ -75,8 +75,8 @@ export const DEFAULT_TITLE_BY_TYPE: Record<OpenSeerNodeType, string> = {
   decision: "New decision",
   image: "New image",
   video: "New video",
-  frame: "New frame",
-  group: "New group",
+  frame: "New group nodes",
+  group: "New grouping",
 };
 
 export function minimapColorForNodeType(t: OpenSeerNodeType | undefined): string {

@@ -64,9 +64,9 @@ function InspectorNodeEditor({
           {draft.nodeType === "howto"
             ? "How-to"
             : draft.nodeType === "group"
-              ? "Group"
+              ? "Grouping"
               : draft.nodeType === "frame"
-                ? "Frame"
+                ? "Group nodes"
                 : draft.nodeType}
         </h2>
         <p className="mt-0.5 truncate text-xs text-zinc-500" title={draft.title}>
@@ -387,7 +387,8 @@ function InspectorNodeEditor({
           <>
             <hr className="border-zinc-800" />
             <p className="text-xs text-zinc-500">
-              Drag the frame to move grouped nodes. Resize the frame to change the box; nodes stay inside.
+              Drag to move grouped nodes together. Resize to change the box; nodes stay inside. Right-click for
+              &quot;Ungroup all&quot; or right-click a child for &quot;Ungroup node&quot;.
             </p>
           </>
         ) : null}
@@ -396,8 +397,8 @@ function InspectorNodeEditor({
           <>
             <hr className="border-zinc-800" />
             <p className="text-xs text-zinc-500">
-              Group name uses <strong className="text-zinc-400">Title</strong> above. Double-click this node on
-              the canvas to edit the nested graph.
+              Name uses <strong className="text-zinc-400">Title</strong> above. Double-click this node on the
+              canvas to edit the nested graph.
             </p>
           </>
         ) : null}

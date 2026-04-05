@@ -206,7 +206,7 @@ export function groupSelectedNodes(
     style: { width: frameW, height: frameH },
     data: {
       ...createEmptyNodeData("frame"),
-      title: "Frame",
+      title: "Group",
     },
   };
 
@@ -226,4 +226,59 @@ export function groupSelectedNodes(
   });
 
   return { nodes: [...pushed, frameNode, ...reparented], edges: viewEdges };
+}
+
+/** Removes a frame node and places its children at absolute positions on the canvas. */
+export function ungroupFrame(
+  viewNodes: Node<OpenSeerNodeData>[],
+  viewEdges: Edge<OpenSeerEdgeData>[],
+  frameId: string
+): { nodes: Node<OpenSeerNodeData>[]; edges: Edge<OpenSeerEdgeData>[] } | null {
+  const frame = viewNodes.find((n) => n.id === frameId);
+  if (!frame || frame.data.nodeType !== "frame") return null;
+
+  const children = viewNodes.filter((n) => n.parentId === frameId);
+  const without = viewNodes.filter((n) => n.id !== frameId && n.parentId !== frameId);
+  const freed = children.map((n) => {
+    const a = absPos(viewNodes, n);
+    return {
+      ...n,
+      parentId: undefined,
+      extent: undefined,
+      zIndex: undefined,
+      position: { x: a.x, y: a.y },
+    };
+  });
+
+  return { nodes: [...without, ...freed], edges: viewEdges };
+}
+
+/** Moves one node out of its frame to absolute coordinates; removes an empty frame. */
+export function ungroupNodeFromFrame(
+  viewNodes: Node<OpenSeerNodeData>[],
+  viewEdges: Edge<OpenSeerEdgeData>[],
+  nodeId: string
+): { nodes: Node<OpenSeerNodeData>[]; edges: Edge<OpenSeerEdgeData>[] } | null {
+  const n = viewNodes.find((x) => x.id === nodeId);
+  if (!n?.parentId) return null;
+  const parent = viewNodes.find((x) => x.id === n.parentId);
+  if (!parent || parent.data.nodeType !== "frame") return null;
+
+  const a = absPos(viewNodes, n);
+  const siblings = viewNodes.filter((x) => x.parentId === parent.id && x.id !== nodeId);
+
+  const updated: Node<OpenSeerNodeData> = {
+    ...n,
+    parentId: undefined,
+    extent: undefined,
+    zIndex: undefined,
+    position: { x: a.x, y: a.y },
+  };
+
+  let nodes = viewNodes.map((x) => (x.id === nodeId ? updated : x));
+  if (siblings.length === 0) {
+    nodes = nodes.filter((x) => x.id !== parent.id);
+  }
+
+  return { nodes, edges: viewEdges };
 }
