@@ -3,6 +3,7 @@ import type { OpenSeerNodeType } from "@/lib/types/graph";
 /** Human-readable labels for filters, sidebars, and node chrome */
 export const NODE_TYPE_LABEL: Record<OpenSeerNodeType, string> = {
   text: "Text",
+  code: "Code",
   proposal: "Proposal",
   program: "Program",
   project: "Project",
@@ -25,6 +26,7 @@ export const NODE_TYPE_LABEL: Record<OpenSeerNodeType, string> = {
 /** Left border accent (Tailwind classes) on canvas nodes */
 export const NODE_TYPE_ACCENT_CLASS: Record<OpenSeerNodeType, string> = {
   text: "border-l-zinc-300",
+  code: "border-l-emerald-500",
   proposal: "border-l-violet-500",
   program: "border-l-blue-500",
   project: "border-l-cyan-500",
@@ -47,6 +49,7 @@ export const NODE_TYPE_ACCENT_CLASS: Record<OpenSeerNodeType, string> = {
 /** MiniMap node fill colors */
 export const NODE_TYPE_MINIMAP_COLOR: Record<OpenSeerNodeType, string> = {
   text: "#d4d4d8",
+  code: "#34d399",
   proposal: "#8b5cf6",
   program: "#3b82f6",
   project: "#06b6d4",
@@ -68,6 +71,7 @@ export const NODE_TYPE_MINIMAP_COLOR: Record<OpenSeerNodeType, string> = {
 
 export const DEFAULT_TITLE_BY_TYPE: Record<OpenSeerNodeType, string> = {
   text: "New text",
+  code: "New code",
   proposal: "New proposal",
   program: "New program",
   project: "New project",

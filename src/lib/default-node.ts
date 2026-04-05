@@ -23,5 +23,8 @@ export function createEmptyNodeData(nodeType: OpenSeerNodeType): OpenSeerNodeDat
   if (nodeType === "group") {
     base.nestedGraph = { nodes: [], edges: [] };
   }
+  if (nodeType === "code") {
+    base.codeBlocks = [{ id: crypto.randomUUID(), content: "" }];
+  }
   return base;
 }

@@ -2,7 +2,9 @@
 
 import type { Edge, Node } from "@xyflow/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { CodeEditorTextarea } from "@/components/openseer/CodeEditorTextarea";
 import { useDebouncedPatchNode } from "@/hooks/use-debounced-graph-patch";
+import { copyAllCodeBlocks, newCodeBlockId, normalizeCodeBlocksForDisplay } from "@/lib/code-blocks";
 import { DEFAULT_TITLE_BY_TYPE } from "@/lib/node-type-meta";
 import { parseYoutubeVideoId } from "@/lib/youtube";
 import type { OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
@@ -244,9 +246,11 @@ function InspectorNodeEditor({
                 ? "Group nodes"
                 : draft.nodeType === "text"
                   ? "Text"
-                  : draft.nodeType === "document"
-                    ? "Document"
-                    : draft.nodeType}
+                  : draft.nodeType === "code"
+                    ? "Code"
+                    : draft.nodeType === "document"
+                      ? "Document"
+                      : draft.nodeType}
         </h2>
         <p className="mt-0.5 truncate text-xs text-zinc-500" title={draft.title}>
           {draft.title}
@@ -260,22 +264,98 @@ function InspectorNodeEditor({
             onChange={(e) => applyDebounced({ title: e.target.value })}
           />
         </Field>
-        <Field label="Short description">
-          <textarea
-            className={textareaClass}
-            value={draft.shortDescription}
-            onChange={(e) => {
-              const v = e.target.value;
-              setDraft((d) => ({ ...d, shortDescription: v }));
-              if (node.data.nodeType === "text") {
-                onPatchNode(id, { shortDescription: v });
-              } else {
-                scheduleNodePatch({ shortDescription: v });
-              }
-            }}
-            rows={draft.nodeType === "text" ? 6 : 3}
-          />
-        </Field>
+        {draft.nodeType !== "code" ? (
+          <Field label="Short description">
+            <textarea
+              className={textareaClass}
+              value={draft.shortDescription}
+              onChange={(e) => {
+                const v = e.target.value;
+                setDraft((d) => ({ ...d, shortDescription: v }));
+                if (node.data.nodeType === "text") {
+                  onPatchNode(id, { shortDescription: v });
+                } else {
+                  scheduleNodePatch({ shortDescription: v });
+                }
+              }}
+              rows={draft.nodeType === "text" ? 6 : 3}
+            />
+          </Field>
+        ) : null}
+
+        {draft.nodeType === "code" ? (
+          <>
+            <hr className="border-zinc-800" />
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Code blocks</p>
+              <button
+                type="button"
+                className="rounded border border-zinc-600 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800"
+                onClick={() =>
+                  void navigator.clipboard.writeText(
+                    copyAllCodeBlocks(normalizeCodeBlocksForDisplay(id, node.data.codeBlocks))
+                  )
+                }
+              >
+                Copy all
+              </button>
+            </div>
+            <div className="flex flex-col gap-3">
+              {normalizeCodeBlocksForDisplay(id, node.data.codeBlocks).map((block) => (
+                <div
+                  key={block.id}
+                  className="rounded border border-zinc-800 bg-zinc-950/50 p-2"
+                >
+                  <div className="mb-1.5 flex justify-end gap-1">
+                    <button
+                      type="button"
+                      className="rounded border border-zinc-600 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800"
+                      onClick={() => void navigator.clipboard.writeText(block.content)}
+                    >
+                      Copy
+                    </button>
+                    <button
+                      type="button"
+                      disabled={normalizeCodeBlocksForDisplay(id, node.data.codeBlocks).length <= 1}
+                      className="rounded border border-zinc-600 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-rose-950/60 hover:text-rose-200 disabled:opacity-40"
+                      onClick={() => {
+                        const cur = normalizeCodeBlocksForDisplay(id, node.data.codeBlocks);
+                        if (cur.length <= 1) return;
+                        const next = cur.filter((b) => b.id !== block.id);
+                        onPatchNode(id, { codeBlocks: next });
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                  <CodeEditorTextarea
+                    value={block.content}
+                    onChange={(content) => {
+                      const cur = normalizeCodeBlocksForDisplay(id, node.data.codeBlocks);
+                      const next = cur.map((b) =>
+                        b.id === block.id ? { ...b, content } : b
+                      );
+                      onPatchNode(id, { codeBlocks: next });
+                    }}
+                    className={`${textareaClass} min-h-[100px]`}
+                    rows={5}
+                  />
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="w-full rounded border border-dashed border-zinc-600 py-2 text-xs text-zinc-400 hover:border-emerald-700 hover:bg-zinc-800/50"
+              onClick={() => {
+                const cur = normalizeCodeBlocksForDisplay(id, node.data.codeBlocks);
+                const next = [...cur, { id: newCodeBlockId(), content: "" }];
+                onPatchNode(id, { codeBlocks: next });
+              }}
+            >
+              + Add block
+            </button>
+          </>
+        ) : null}
         <Field label="Status">
           <select
             className={inputClass}
