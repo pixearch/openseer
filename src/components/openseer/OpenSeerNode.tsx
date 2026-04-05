@@ -578,6 +578,16 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
               >
                 URL…
               </button>
+              {data.videoUrl?.trim() ? (
+                <a
+                  href={data.videoUrl.trim()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800"
+                >
+                  Open link
+                </a>
+              ) : null}
             </div>
           </div>
           {data.videoUrl ? (
@@ -624,6 +634,8 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
     );
   }
 
+  const isTextNode = data.nodeType === "text";
+
   return (
     <div
       className={[
@@ -631,6 +643,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         "border-l-[3px]",
         accent,
         selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
+        isTextNode ? "flex min-h-0 flex-col overflow-hidden" : "",
       ].join(" ")}
       style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
     >
@@ -640,7 +653,12 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         position={Position.Left}
         className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
       />
-      <div className="border-b border-zinc-800/80 px-3 py-2">
+      <div
+        className={[
+          "border-b border-zinc-800/80 px-3 py-2",
+          isTextNode ? "shrink-0" : "",
+        ].join(" ")}
+      >
         <div className="flex items-center justify-between gap-2">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
             {typeLabel}
@@ -652,7 +670,13 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         </div>
         <div className="mt-1 font-medium leading-snug text-zinc-100">{data.title}</div>
       </div>
-      <div className="space-y-2 px-3 py-2">
+      <div
+        className={[
+          isTextNode
+            ? "flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 py-2"
+            : "space-y-2 px-3 py-2",
+        ].join(" ")}
+      >
         {data.nodeType === "evidence" && data.imageUrl ? (
           <div className="overflow-hidden rounded border border-zinc-800">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -679,17 +703,25 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           </a>
         ) : null}
         {data.shortDescription ? (
-          <p className="line-clamp-3 text-xs leading-relaxed text-zinc-400">{data.shortDescription}</p>
+          <p
+            className={
+              isTextNode
+                ? "min-h-0 flex-1 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-zinc-400"
+                : "line-clamp-3 text-xs leading-relaxed text-zinc-400"
+            }
+          >
+            {data.shortDescription}
+          </p>
         ) : data.nodeType !== "evidence" || (!data.imageUrl && !data.videoUrl) ? (
           <p className="text-xs italic text-zinc-600">No description</p>
         ) : null}
         {data.owner ? (
-          <p className="text-[11px] text-zinc-500">
+          <p className={`text-[11px] text-zinc-500${isTextNode ? " shrink-0" : ""}`}>
             <span className="text-zinc-600">Owner</span> {data.owner}
           </p>
         ) : null}
         {previewTags.length > 0 ? (
-          <div className="flex flex-wrap gap-1">
+          <div className={`flex flex-wrap gap-1${isTextNode ? " shrink-0" : ""}`}>
             {previewTags.map((t) => (
               <span
                 key={t}
