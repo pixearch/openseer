@@ -13,10 +13,13 @@ export const DEFAULT_TITLE_BY_TYPE: Record<OpenSeerNodeType, string> = {
   risk: "New risk",
   cost: "New cost",
   decision: "New decision",
+  image: "New image",
+  video: "New video",
+  group: "New group",
 };
 
 export function createEmptyNodeData(nodeType: OpenSeerNodeType): OpenSeerNodeData {
-  return {
+  const base: OpenSeerNodeData = {
     nodeType,
     title: DEFAULT_TITLE_BY_TYPE[nodeType],
     shortDescription: "",
@@ -25,4 +28,8 @@ export function createEmptyNodeData(nodeType: OpenSeerNodeType): OpenSeerNodeDat
     tags: [],
     notes: "",
   };
+  if (nodeType === "group") {
+    base.nestedGraph = { nodes: [], edges: [] };
+  }
+  return base;
 }

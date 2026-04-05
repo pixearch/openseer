@@ -12,6 +12,9 @@ export const OPEN_SEER_NODE_TYPES = [
   "risk",
   "cost",
   "decision",
+  "image",
+  "video",
+  "group",
 ] as const;
 
 export type OpenSeerNodeType = (typeof OPEN_SEER_NODE_TYPES)[number];
@@ -71,6 +74,12 @@ export interface OpenSeerNodeData {
   rationale?: string;
   decisionDate?: string;
   outcome?: string;
+
+  /** Nested graph for `group` nodes */
+  nestedGraph?: {
+    nodes: import("@xyflow/react").Node<OpenSeerNodeData>[];
+    edges: import("@xyflow/react").Edge<OpenSeerEdgeData>[];
+  };
 
   /** Satisfies React Flow node data constraint */
   [key: string]: unknown;

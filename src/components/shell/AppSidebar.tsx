@@ -112,9 +112,9 @@ export function AppSidebar({ collapsed }: AppSidebarProps) {
       </div>
       {!collapsed ? (
         <div className="border-t border-zinc-800 p-3 text-[10px] leading-snug text-zinc-600">
-          Graph workspace:{" "}
+          Open graph:{" "}
           <Link href="/workspace/graph" className="text-sky-600 hover:text-sky-400">
-            Current workspace
+            Workspace graph
           </Link>
         </div>
       ) : null}

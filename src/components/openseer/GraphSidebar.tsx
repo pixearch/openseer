@@ -17,6 +17,9 @@ const TYPE_FILTER_LABEL: Record<OpenSeerNodeType, string> = {
   risk: "Risk",
   cost: "Cost",
   decision: "Decision",
+  image: "Image",
+  video: "Video",
+  group: "Group",
 };
 
 interface GraphSidebarProps {

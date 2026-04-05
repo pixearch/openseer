@@ -11,12 +11,15 @@ import {
   Controls,
   MarkerType,
   MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
+  SelectionMode,
   useReactFlow,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Connection, Edge, EdgeChange, Node, NodeChange } from "@xyflow/react";
+import type { MouseEvent as ReactMouseEvent } from "react";
+import type { Connection, Edge, EdgeChange, Node, NodeChange, NodeMouseHandler } from "@xyflow/react";
 import { createGitOnboardingSeed, SEED_GRAPH_ID, SEED_GRAPH_NAME } from "@/data/seed-git-onboarding";
 import { createEmptyNodeData } from "@/lib/default-node";
 import {
@@ -38,6 +41,120 @@ const defaultEdgeOptions = {
   style: { stroke: "#64748b", strokeWidth: 1.5 },
 };
 
+function getViewGraph(
+  rootNodes: Node<OpenSeerNodeData>[],
+  rootEdges: Edge<OpenSeerEdgeData>[],
+  path: string[]
+): { nodes: Node<OpenSeerNodeData>[]; edges: Edge<OpenSeerEdgeData>[] } {
+  if (path.length === 0) return { nodes: rootNodes, edges: rootEdges };
+  let nodes = rootNodes;
+  let edges = rootEdges;
+  for (const id of path) {
+    const gn = nodes.find((x) => x.id === id);
+    if (!gn || gn.data.nodeType !== "group") return { nodes: [], edges: [] };
+    const ng = gn.data.nestedGraph ?? { nodes: [], edges: [] };
+    nodes = ng.nodes as Node<OpenSeerNodeData>[];
+    edges = ng.edges as Edge<OpenSeerEdgeData>[];
+  }
+  return { nodes, edges };
+}
+
+function patchNestedGraph(
+  nodes: Node<OpenSeerNodeData>[],
+  path: string[],
+  nextNodes: Node<OpenSeerNodeData>[],
+  nextEdges: Edge<OpenSeerEdgeData>[]
+): Node<OpenSeerNodeData>[] {
+  if (path.length === 0) return nextNodes;
+  const [head, ...tail] = path;
+  return nodes.map((n) => {
+    if (n.id !== head) return n;
+    const ng = (n.data.nestedGraph ?? { nodes: [], edges: [] }) as {
+      nodes: Node<OpenSeerNodeData>[];
+      edges: Edge<OpenSeerEdgeData>[];
+    };
+    if (tail.length === 0) {
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          nestedGraph: { nodes: nextNodes, edges: nextEdges },
+        },
+      };
+    }
+    return {
+      ...n,
+      data: {
+        ...n.data,
+        nestedGraph: {
+          nodes: patchNestedGraph(ng.nodes, tail, nextNodes, nextEdges),
+          edges: ng.edges,
+        },
+      },
+    };
+  });
+}
+
+function titlesAlongPath(
+  rootNodes: Node<OpenSeerNodeData>[],
+  path: string[]
+): string[] {
+  const titles: string[] = [];
+  let nodes = rootNodes;
+  for (const id of path) {
+    const n = nodes.find((x) => x.id === id);
+    if (!n) break;
+    titles.push(n.data.title);
+    if (n.data.nodeType === "group" && n.data.nestedGraph) {
+      nodes = n.data.nestedGraph.nodes as Node<OpenSeerNodeData>[];
+    }
+  }
+  return titles;
+}
+
+function groupSelectedNodes(
+  viewNodes: Node<OpenSeerNodeData>[],
+  viewEdges: Edge<OpenSeerEdgeData>[],
+  selectedIds: string[]
+): { nodes: Node<OpenSeerNodeData>[]; edges: Edge<OpenSeerEdgeData>[] } | null {
+  if (selectedIds.length < 2) return null;
+  const set = new Set(selectedIds);
+  const selected = viewNodes.filter((n) => set.has(n.id));
+  if (selected.length < 2) return null;
+  const xs = selected.map((n) => n.position.x);
+  const ys = selected.map((n) => n.position.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+  const padX = 48;
+  const padY = 56;
+  const innerW = maxX - minX + 240;
+  const innerH = maxY - minY + 120;
+  const gid = `n-${crypto.randomUUID()}`;
+  const nestedNodes = selected.map((n) => ({
+    ...n,
+    position: { x: n.position.x - minX + padX, y: n.position.y - minY + padY },
+  }));
+  const nestedEdges = viewEdges
+    .filter((e) => set.has(e.source) && set.has(e.target))
+    .map((e) => ({ ...e, id: `e-${crypto.randomUUID().slice(0, 12)}` }));
+  const groupNode: Node<OpenSeerNodeData> = {
+    id: gid,
+    type: "openSeer",
+    position: { x: minX - padX, y: minY - padY },
+    style: { width: Math.max(innerW + padX * 2, 320), height: Math.max(innerH + padY, 200) },
+    data: {
+      ...createEmptyNodeData("group"),
+      title: "Group",
+      nestedGraph: { nodes: nestedNodes, edges: nestedEdges },
+    },
+  };
+  const remainingNodes = viewNodes.filter((n) => !set.has(n.id));
+  const remainingEdges = viewEdges.filter((e) => !set.has(e.source) && !set.has(e.target));
+  return { nodes: [...remainingNodes, groupNode], edges: remainingEdges };
+}
+
 function minimapNodeColor(n: Node<OpenSeerNodeData>) {
   const t = n.data?.nodeType;
   const map: Partial<Record<OpenSeerNodeType, string>> = {
@@ -53,18 +170,41 @@ function minimapNodeColor(n: Node<OpenSeerNodeData>) {
     risk: "#f43f5e",
     cost: "#ca8a04",
     decision: "#6366f1",
+    image: "#a78bfa",
+    video: "#38bdf8",
+    group: "#22d3ee",
   };
   return map[t ?? "task"] ?? "#52525b";
 }
 
+type CtxMenu =
+  | {
+      kind: "pane";
+      clientX: number;
+      clientY: number;
+      flowX: number;
+      flowY: number;
+    }
+  | {
+      kind: "nodes";
+      clientX: number;
+      clientY: number;
+      selectedIds: string[];
+    };
+
 function GraphWorkspaceInner() {
   const flowAreaRef = useRef<HTMLDivElement>(null);
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, fitView, getNodes } = useReactFlow();
 
   const [ready, setReady] = useState(false);
   const [graphMeta, setGraphMeta] = useState({ id: SEED_GRAPH_ID, name: SEED_GRAPH_NAME });
-  const [nodes, setNodes] = useState<Node<OpenSeerNodeData>[]>([]);
-  const [edges, setEdges] = useState<Edge<OpenSeerEdgeData>[]>([]);
+  const [doc, setDoc] = useState<{
+    nodes: Node<OpenSeerNodeData>[];
+    edges: Edge<OpenSeerEdgeData>[];
+  }>({ nodes: [], edges: [] });
+  const [groupPath, setGroupPath] = useState<string[]>([]);
+  const [focusMode, setFocusMode] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
   const [visibleTypes, setVisibleTypes] = useState<Set<OpenSeerNodeType>>(
     () => new Set(OPEN_SEER_NODE_TYPES)
   );
@@ -73,17 +213,25 @@ function GraphWorkspaceInner() {
     edgeId: null,
   });
 
+  const groupPathKey = groupPath.join("|");
+
+  const view = useMemo(
+    () => getViewGraph(doc.nodes, doc.edges, groupPath),
+    [doc.nodes, doc.edges, groupPath]
+  );
+
   useEffect(() => {
     const id = window.requestAnimationFrame(() => {
       const saved = loadGraphDocument();
       if (saved) {
-        setNodes(saved.nodes as Node<OpenSeerNodeData>[]);
-        setEdges(saved.edges as Edge<OpenSeerEdgeData>[]);
+        setDoc({
+          nodes: saved.nodes as Node<OpenSeerNodeData>[],
+          edges: saved.edges as Edge<OpenSeerEdgeData>[],
+        });
         setGraphMeta({ id: saved.id, name: saved.name });
       } else {
         const seed = createGitOnboardingSeed();
-        setNodes(seed.nodes);
-        setEdges(seed.edges);
+        setDoc({ nodes: seed.nodes, edges: seed.edges });
         setGraphMeta({ id: SEED_GRAPH_ID, name: SEED_GRAPH_NAME });
         saveGraphDocument(
           documentFromState(SEED_GRAPH_NAME, SEED_GRAPH_ID, seed.nodes, seed.edges)
@@ -97,39 +245,85 @@ function GraphWorkspaceInner() {
   useEffect(() => {
     if (!ready) return;
     const t = window.setTimeout(() => {
-      saveGraphDocument(documentFromState(graphMeta.name, graphMeta.id, nodes, edges));
+      saveGraphDocument(documentFromState(graphMeta.name, graphMeta.id, doc.nodes, doc.edges));
     }, 400);
     return () => window.clearTimeout(t);
-  }, [nodes, edges, graphMeta, ready]);
+  }, [doc.nodes, doc.edges, graphMeta, ready]);
 
   const initialFitDone = useRef(false);
   useEffect(() => {
-    if (!ready || initialFitDone.current || nodes.length === 0) return;
+    initialFitDone.current = false;
+  }, [groupPathKey]);
+
+  useEffect(() => {
+    if (!ready || initialFitDone.current || view.nodes.length === 0) return;
     initialFitDone.current = true;
     const id = window.requestAnimationFrame(() => {
       fitView({ padding: 0.12, maxZoom: 1.15, duration: 200 });
     });
     return () => window.cancelAnimationFrame(id);
-  }, [ready, nodes.length, fitView]);
+  }, [ready, view.nodes.length, fitView, groupPathKey]);
 
-  const onNodesChange = useCallback((changes: NodeChange<Node<OpenSeerNodeData>>[]) => {
-    setNodes((nds) => applyNodeChanges(changes, nds));
-  }, []);
-
-  const onEdgesChange = useCallback((changes: EdgeChange<Edge<OpenSeerEdgeData>>[]) => {
-    setEdges((eds) => applyEdgeChanges(changes, eds));
-  }, []);
-
-  const onConnect = useCallback((connection: Connection) => {
-    const id = `e-${connection.source}-${connection.target}-${crypto.randomUUID().slice(0, 8)}`;
-    const next: Edge<OpenSeerEdgeData> = {
-      ...connection,
-      id,
-      label: "relates_to",
-      data: { label: "relates_to", relationshipType: "relates_to" },
+  useEffect(() => {
+    if (!focusMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFocusMode(false);
     };
-    setEdges((eds) => addEdge(next, eds));
-  }, []);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focusMode]);
+
+  const onNodesChange = useCallback(
+    (changes: NodeChange<Node<OpenSeerNodeData>>[]) => {
+      setDoc((d) => {
+        const v = getViewGraph(d.nodes, d.edges, groupPath);
+        const nn = applyNodeChanges(changes, v.nodes);
+        if (groupPath.length === 0) return { nodes: nn, edges: d.edges };
+        return {
+          nodes: patchNestedGraph(d.nodes, groupPath, nn, v.edges),
+          edges: d.edges,
+        };
+      });
+    },
+    [groupPath]
+  );
+
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange<Edge<OpenSeerEdgeData>>[]) => {
+      setDoc((d) => {
+        const v = getViewGraph(d.nodes, d.edges, groupPath);
+        const ne = applyEdgeChanges(changes, v.edges);
+        if (groupPath.length === 0) return { nodes: d.nodes, edges: ne };
+        return {
+          nodes: patchNestedGraph(d.nodes, groupPath, v.nodes, ne),
+          edges: d.edges,
+        };
+      });
+    },
+    [groupPath]
+  );
+
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      const id = `e-${connection.source}-${connection.target}-${crypto.randomUUID().slice(0, 8)}`;
+      const next: Edge<OpenSeerEdgeData> = {
+        ...connection,
+        id,
+        label: "relates_to",
+        data: { label: "relates_to", relationshipType: "relates_to" },
+      };
+      setDoc((d) => {
+        const v = getViewGraph(d.nodes, d.edges, groupPath);
+        const ne = addEdge(next, v.edges);
+        if (groupPath.length === 0) return { nodes: d.nodes, edges: ne };
+        return {
+          nodes: patchNestedGraph(d.nodes, groupPath, v.nodes, ne),
+          edges: d.edges,
+        };
+      });
+    },
+    [groupPath]
+  );
 
   const onSelectionChange = useCallback(
     ({ nodes: sn, edges: se }: { nodes: Node[]; edges: Edge[] }) => {
@@ -161,15 +355,15 @@ function GraphWorkspaceInner() {
   }, []);
 
   const flowNodes = useMemo(
-    () => nodes.filter((n) => visibleTypes.has(n.data.nodeType)),
-    [nodes, visibleTypes]
+    () => view.nodes.filter((n) => visibleTypes.has(n.data.nodeType)),
+    [view.nodes, visibleTypes]
   );
 
   const flowEdges = useMemo(
     () =>
-      edges.filter((e) => {
-        const s = nodes.find((n) => n.id === e.source);
-        const t = nodes.find((n) => n.id === e.target);
+      view.edges.filter((e) => {
+        const s = view.nodes.find((n) => n.id === e.source);
+        const t = view.nodes.find((n) => n.id === e.target);
         return (
           !!s &&
           !!t &&
@@ -177,41 +371,83 @@ function GraphWorkspaceInner() {
           visibleTypes.has(t.data.nodeType)
         );
       }),
-    [edges, nodes, visibleTypes]
+    [view.edges, view.nodes, visibleTypes]
   );
 
   const selectedNode = useMemo(
-    () => nodes.find((n) => n.id === selection.nodeId) ?? null,
-    [nodes, selection.nodeId]
+    () => view.nodes.find((n) => n.id === selection.nodeId) ?? null,
+    [view.nodes, selection.nodeId]
   );
 
   const selectedEdge = useMemo(
-    () => edges.find((e) => e.id === selection.edgeId) ?? null,
-    [edges, selection.edgeId]
+    () => view.edges.find((e) => e.id === selection.edgeId) ?? null,
+    [view.edges, selection.edgeId]
   );
 
-  const onPatchNode = useCallback((id: string, patch: Partial<OpenSeerNodeData>) => {
-    setNodes((nds) =>
-      nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n))
-    );
-  }, []);
+  const onPatchNode = useCallback(
+    (id: string, patch: Partial<OpenSeerNodeData>) => {
+      setDoc((d) => {
+        const v = getViewGraph(d.nodes, d.edges, groupPath);
+        const nn = v.nodes.map((n) =>
+          n.id === id ? { ...n, data: { ...n.data, ...patch } } : n
+        );
+        if (groupPath.length === 0) return { nodes: nn, edges: d.edges };
+        return {
+          nodes: patchNestedGraph(d.nodes, groupPath, nn, v.edges),
+          edges: d.edges,
+        };
+      });
+    },
+    [groupPath]
+  );
 
-  const onPatchEdge = useCallback((id: string, next: OpenSeerEdgeData) => {
-    setEdges((eds) =>
-      eds.map((e) => (e.id === id ? { ...e, label: next.label, data: next } : e))
-    );
-  }, []);
+  const onPatchEdge = useCallback(
+    (id: string, next: OpenSeerEdgeData) => {
+      setDoc((d) => {
+        const v = getViewGraph(d.nodes, d.edges, groupPath);
+        const ne = v.edges.map((e) => (e.id === id ? { ...e, label: next.label, data: next } : e));
+        if (groupPath.length === 0) return { nodes: d.nodes, edges: ne };
+        return {
+          nodes: patchNestedGraph(d.nodes, groupPath, v.nodes, ne),
+          edges: d.edges,
+        };
+      });
+    },
+    [groupPath]
+  );
 
-  const onDeleteNode = useCallback((id: string) => {
-    setNodes((nds) => nds.filter((n) => n.id !== id));
-    setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
-    setSelection({ nodeId: null, edgeId: null });
-  }, []);
+  const onDeleteNode = useCallback(
+    (id: string) => {
+      setDoc((d) => {
+        const v = getViewGraph(d.nodes, d.edges, groupPath);
+        const nn = v.nodes.filter((n) => n.id !== id);
+        const ne = v.edges.filter((e) => e.source !== id && e.target !== id);
+        if (groupPath.length === 0) return { nodes: nn, edges: ne };
+        return {
+          nodes: patchNestedGraph(d.nodes, groupPath, nn, ne),
+          edges: d.edges,
+        };
+      });
+      setSelection({ nodeId: null, edgeId: null });
+    },
+    [groupPath]
+  );
 
-  const onDeleteEdge = useCallback((id: string) => {
-    setEdges((eds) => eds.filter((e) => e.id !== id));
-    setSelection({ nodeId: null, edgeId: null });
-  }, []);
+  const onDeleteEdge = useCallback(
+    (id: string) => {
+      setDoc((d) => {
+        const v = getViewGraph(d.nodes, d.edges, groupPath);
+        const ne = v.edges.filter((e) => e.id !== id);
+        if (groupPath.length === 0) return { nodes: d.nodes, edges: ne };
+        return {
+          nodes: patchNestedGraph(d.nodes, groupPath, v.nodes, ne),
+          edges: d.edges,
+        };
+      });
+      setSelection({ nodeId: null, edgeId: null });
+    },
+    [groupPath]
+  );
 
   const onToggleType = useCallback((t: OpenSeerNodeType) => {
     setVisibleTypes((prev) => {
@@ -228,20 +464,48 @@ function GraphWorkspaceInner() {
 
   const onLoadDemo = useCallback(() => {
     const seed = createGitOnboardingSeed();
-    setNodes(seed.nodes);
-    setEdges(seed.edges);
+    setDoc({ nodes: seed.nodes, edges: seed.edges });
     setGraphMeta({ id: SEED_GRAPH_ID, name: SEED_GRAPH_NAME });
+    setGroupPath([]);
     setSelection({ nodeId: null, edgeId: null });
+    initialFitDone.current = false;
     window.setTimeout(() => fitView({ padding: 0.12, maxZoom: 1.15, duration: 200 }), 60);
   }, [fitView]);
 
   const onNewBlank = useCallback(() => {
     const id = crypto.randomUUID();
-    setNodes([]);
-    setEdges([]);
+    setDoc({ nodes: [], edges: [] });
     setGraphMeta({ id, name: "Untitled graph" });
+    setGroupPath([]);
     setSelection({ nodeId: null, edgeId: null });
   }, []);
+
+  const onAddNodeAt = useCallback(
+    (nodeType: OpenSeerNodeType, position: { x: number; y: number }) => {
+      const id = `n-${crypto.randomUUID()}`;
+      setDoc((d) => {
+        const v = getViewGraph(d.nodes, d.edges, groupPath);
+        const nextNodes = [
+          ...v.nodes,
+          {
+            id,
+            type: "openSeer" as const,
+            position: {
+              x: position.x + (Math.random() - 0.5) * 80,
+              y: position.y + (Math.random() - 0.5) * 80,
+            },
+            data: createEmptyNodeData(nodeType),
+          },
+        ];
+        if (groupPath.length === 0) return { nodes: nextNodes, edges: d.edges };
+        return {
+          nodes: patchNestedGraph(d.nodes, groupPath, nextNodes, v.edges),
+          edges: d.edges,
+        };
+      });
+    },
+    [groupPath]
+  );
 
   const onAddNode = useCallback(
     (nodeType: OpenSeerNodeType) => {
@@ -250,78 +514,257 @@ function GraphWorkspaceInner() {
       const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
       const y = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
       const position = screenToFlowPosition({ x, y });
-      const id = `n-${crypto.randomUUID()}`;
-      setNodes((nds) => [
-        ...nds,
-        {
-          id,
-          type: "openSeer",
-          position: {
-            x: position.x + (Math.random() - 0.5) * 100,
-            y: position.y + (Math.random() - 0.5) * 100,
-          },
-          data: createEmptyNodeData(nodeType),
-        },
-      ]);
+      onAddNodeAt(nodeType, position);
+    },
+    [screenToFlowPosition, onAddNodeAt]
+  );
+
+  const onPaneContextMenu = useCallback(
+    (e: ReactMouseEvent<Element> | globalThis.MouseEvent) => {
+      e.preventDefault();
+      const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      setCtxMenu({
+        kind: "pane",
+        clientX: e.clientX,
+        clientY: e.clientY,
+        flowX: p.x,
+        flowY: p.y,
+      });
     },
     [screenToFlowPosition]
   );
 
+  const onNodeContextMenu: NodeMouseHandler = useCallback(
+    (e, node) => {
+      e.preventDefault();
+      const sel = getNodes().filter((n) => n.selected);
+      const selectedIds =
+        sel.length > 0 ? sel.map((n) => n.id) : [node.id];
+      setCtxMenu({
+        kind: "nodes",
+        clientX: e.clientX,
+        clientY: e.clientY,
+        selectedIds,
+      });
+    },
+    [getNodes]
+  );
+
+  const onNodeDoubleClick: NodeMouseHandler = useCallback(
+    (_e, node) => {
+      if (node.data.nodeType === "group") {
+        setGroupPath((p) => [...p, node.id]);
+        setSelection({ nodeId: null, edgeId: null });
+        initialFitDone.current = false;
+      }
+    },
+    []
+  );
+
+  const runGroupSelection = useCallback(() => {
+    if (!ctxMenu || ctxMenu.kind !== "nodes") return;
+    const ids = ctxMenu.selectedIds;
+    setCtxMenu(null);
+    setDoc((d) => {
+      const v = getViewGraph(d.nodes, d.edges, groupPath);
+      const g = groupSelectedNodes(v.nodes, v.edges, ids);
+      if (!g) return d;
+      if (groupPath.length === 0) return { nodes: g.nodes, edges: g.edges };
+      return {
+        nodes: patchNestedGraph(d.nodes, groupPath, g.nodes, g.edges),
+        edges: d.edges,
+      };
+    });
+  }, [ctxMenu, groupPath]);
+
+  const crumbTitles = useMemo(() => titlesAlongPath(doc.nodes, groupPath), [doc.nodes, groupPath]);
+
+  const flowColumn = (
+    <div ref={flowAreaRef} className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[#0c0c0e]">
+      {focusMode ? (
+        <div className="flex shrink-0 items-center justify-end border-b border-zinc-800 bg-zinc-950 px-2 py-1">
+          <button
+            type="button"
+            className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+            onClick={() => setFocusMode(false)}
+          >
+            Minimize
+          </button>
+        </div>
+      ) : null}
+      {groupPath.length > 0 ? (
+        <div className="z-10 flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800 bg-zinc-950/95 px-3 py-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-zinc-400">
+            <button
+              type="button"
+              className="font-medium text-sky-400 hover:text-sky-300"
+              onClick={() => {
+                setGroupPath([]);
+                initialFitDone.current = false;
+              }}
+            >
+              Main
+            </button>
+            {crumbTitles.map((t, i) => (
+              <span key={`${groupPath[i]}-${i}`} className="flex items-center gap-1">
+                <span className="text-zinc-600">/</span>
+                <button
+                  type="button"
+                  className="truncate text-zinc-200 hover:text-white"
+                  onClick={() => {
+                    setGroupPath(groupPath.slice(0, i + 1));
+                    initialFitDone.current = false;
+                  }}
+                >
+                  {t}
+                </button>
+              </span>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="shrink-0 rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+            onClick={() => {
+              setGroupPath([]);
+              initialFitDone.current = false;
+            }}
+          >
+            Exit
+          </button>
+        </div>
+      ) : null}
+      <ReactFlow
+        className={`min-h-0 flex-1 bg-[#0c0c0e] ${groupPath.length > 0 && !focusMode ? "pt-0" : ""}`}
+        nodes={flowNodes}
+        edges={flowEdges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onNodesDelete={onNodesDelete}
+        onEdgesDelete={onEdgesDelete}
+        onConnect={onConnect}
+        onSelectionChange={onSelectionChange}
+        onPaneContextMenu={onPaneContextMenu}
+        onNodeContextMenu={onNodeContextMenu}
+        onNodeDoubleClick={onNodeDoubleClick}
+        nodeTypes={nodeTypes}
+        defaultEdgeOptions={defaultEdgeOptions}
+        fitView
+        proOptions={{ hideAttribution: true }}
+        deleteKeyCode={["Backspace", "Delete"]}
+        selectionOnDrag
+        panOnDrag={[1, 2]}
+        selectionMode={SelectionMode.Partial}
+        multiSelectionKeyCode="Shift"
+      >
+        <Background
+          id="os-grid"
+          variant={BackgroundVariant.Dots}
+          gap={20}
+          size={1}
+          color="#27272a"
+        />
+        <Controls
+          className="!m-3 !border !border-zinc-700 !bg-zinc-900/95 !shadow-lg [&_button]:!border-zinc-700 [&_button]:!bg-zinc-900 [&_button]:!text-zinc-200 [&_button:hover]:!bg-zinc-800"
+          showInteractive={false}
+        />
+        <Panel position="bottom-left" className="!m-3 mb-14 ml-3">
+          <button
+            type="button"
+            onClick={() => setFocusMode(true)}
+            className="rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-xs font-medium text-zinc-200 shadow hover:bg-zinc-800"
+          >
+            Focus
+          </button>
+        </Panel>
+        <MiniMap
+          className="!m-3 !rounded-md !border !border-zinc-700 !bg-zinc-900/90"
+          nodeStrokeWidth={2}
+          nodeColor={minimapNodeColor}
+          maskColor="rgb(12, 12, 14, 0.85)"
+        />
+      </ReactFlow>
+      {ctxMenu ? (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-40 cursor-default bg-transparent"
+            aria-label="Close menu"
+            onClick={() => setCtxMenu(null)}
+          />
+          <div
+            className="fixed z-50 max-h-[min(70vh,360px)] w-52 overflow-y-auto rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
+            style={{ left: ctxMenu.clientX, top: ctxMenu.clientY }}
+          >
+            {ctxMenu.kind === "pane" ? (
+              OPEN_SEER_NODE_TYPES.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className="block w-full px-3 py-1.5 text-left text-sm capitalize text-zinc-200 hover:bg-zinc-800"
+                  onClick={() => {
+                    onAddNodeAt(t, { x: ctxMenu.flowX, y: ctxMenu.flowY });
+                    setCtxMenu(null);
+                  }}
+                >
+                  {t === "howto" ? "How-To" : t}
+                </button>
+              ))
+            ) : (
+              <>
+                {ctxMenu.selectedIds.length >= 2 ? (
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                    onClick={runGroupSelection}
+                  >
+                    Group selection
+                  </button>
+                ) : null}
+                <p className="px-3 py-1 text-[11px] text-zinc-600">
+                  {ctxMenu.selectedIds.length < 2
+                    ? "Select 2+ nodes (Shift-click) to group."
+                    : ""}
+                </p>
+              </>
+            )}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+
   return (
-    <div className="flex h-full min-h-0 flex-1">
-      <GraphSidebar
-        graphName={graphMeta.name}
-        visibleTypes={visibleTypes}
-        onToggleType={onToggleType}
-        onShowAllTypes={onShowAllTypes}
-        onLoadDemo={onLoadDemo}
-        onNewBlank={onNewBlank}
-        onAddNode={onAddNode}
-      />
-      <div ref={flowAreaRef} className="relative min-h-0 min-w-0 flex-1 bg-[#0c0c0e]">
-        <ReactFlow
-          nodes={flowNodes}
-          edges={flowEdges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onNodesDelete={onNodesDelete}
-          onEdgesDelete={onEdgesDelete}
-          onConnect={onConnect}
-          onSelectionChange={onSelectionChange}
-          nodeTypes={nodeTypes}
-          defaultEdgeOptions={defaultEdgeOptions}
-          fitView
-          proOptions={{ hideAttribution: true }}
-          deleteKeyCode={["Backspace", "Delete"]}
-          className="bg-[#0c0c0e]"
-        >
-          <Background
-            id="os-grid"
-            variant={BackgroundVariant.Dots}
-            gap={20}
-            size={1}
-            color="#27272a"
-          />
-          <Controls
-            className="!m-3 !border !border-zinc-700 !bg-zinc-900/95 !shadow-lg [&_button]:!border-zinc-700 [&_button]:!bg-zinc-900 [&_button]:!text-zinc-200 [&_button:hover]:!bg-zinc-800"
-            showInteractive={false}
-          />
-          <MiniMap
-            className="!m-3 !rounded-md !border !border-zinc-700 !bg-zinc-900/90"
-            nodeStrokeWidth={2}
-            nodeColor={minimapNodeColor}
-            maskColor="rgb(12, 12, 14, 0.85)"
-          />
-        </ReactFlow>
+    <div className="relative flex h-full min-h-0 flex-1">
+      {!focusMode ? (
+        <GraphSidebar
+          graphName={graphMeta.name}
+          visibleTypes={visibleTypes}
+          onToggleType={onToggleType}
+          onShowAllTypes={onShowAllTypes}
+          onLoadDemo={onLoadDemo}
+          onNewBlank={onNewBlank}
+          onAddNode={onAddNode}
+        />
+      ) : null}
+      <div
+        className={
+          focusMode
+            ? "fixed inset-0 z-[200] flex min-h-0 flex-1 flex-col bg-[#0c0c0e]"
+            : "relative flex min-h-0 min-w-0 flex-1 flex-col"
+        }
+      >
+        {flowColumn}
       </div>
-      <InspectorPanel
-        selectedNode={selectedNode}
-        selectedEdge={selectedEdge}
-        onPatchNode={onPatchNode}
-        onPatchEdge={onPatchEdge}
-        onDeleteNode={onDeleteNode}
-        onDeleteEdge={onDeleteEdge}
-      />
+      {!focusMode ? (
+        <InspectorPanel
+          selectedNode={selectedNode}
+          selectedEdge={selectedEdge}
+          onPatchNode={onPatchNode}
+          onPatchEdge={onPatchEdge}
+          onDeleteNode={onDeleteNode}
+          onDeleteEdge={onDeleteEdge}
+        />
+      ) : null}
     </div>
   );
 }
