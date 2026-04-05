@@ -1,8 +1,9 @@
 "use client";
 
 import type { Edge, Node } from "@xyflow/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDebouncedPatchNode } from "@/hooks/use-debounced-graph-patch";
+import { DEFAULT_TITLE_BY_TYPE } from "@/lib/node-type-meta";
 import { parseYoutubeVideoId } from "@/lib/youtube";
 import type { OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
 import { OPEN_SEER_STATUSES } from "@/lib/types/graph";
@@ -162,6 +163,11 @@ function InspectorNodeEditor({
 
   const tagsStr = draft.tags.join(", ");
 
+  const draftRef = useRef(draft);
+  useLayoutEffect(() => {
+    draftRef.current = draft;
+  });
+
   const prevVideoUrlRef = useRef(node.data.videoUrl ?? "");
   useEffect(() => {
     if (node.data.nodeType !== "video") return;
@@ -189,17 +195,11 @@ function InspectorNodeEditor({
     setDraft((d) => ({ ...d, documentUrl: next }));
   }, [node.data.documentUrl, node.data.nodeType, node.id]);
 
-  const videoAutofillFirstDebounceRef = useRef(true);
-
   useEffect(() => {
     if (draft.nodeType !== "video") return;
     const ac = new AbortController();
     const timer = window.setTimeout(async () => {
       const u = (draft.videoUrl ?? "").trim();
-      if (videoAutofillFirstDebounceRef.current) {
-        videoAutofillFirstDebounceRef.current = false;
-        if (u === (node.data.videoUrl ?? "").trim()) return;
-      }
       if (!parseYoutubeVideoId(u)) return;
       try {
         const r = await fetch(`/api/youtube-metadata?url=${encodeURIComponent(u)}`, {
@@ -209,10 +209,18 @@ function InspectorNodeEditor({
         const meta = (await r.json()) as { title?: string; author?: string };
         if (ac.signal.aborted) return;
         const patch: Partial<OpenSeerNodeData> = {};
-        if (typeof meta.title === "string" && meta.title) patch.title = meta.title;
-        if (typeof meta.author === "string" && meta.author) patch.owner = meta.author;
+        const d = draftRef.current;
+        const defaultVideoTitle = DEFAULT_TITLE_BY_TYPE.video;
+        if (typeof meta.title === "string" && meta.title) {
+          if (!d.title.trim() || d.title === defaultVideoTitle) {
+            patch.title = meta.title;
+          }
+        }
+        if (typeof meta.author === "string" && meta.author && !(d.owner ?? "").trim()) {
+          patch.owner = meta.author;
+        }
         if (Object.keys(patch).length === 0) return;
-        setDraft((d) => ({ ...d, ...patch }));
+        setDraft((prev) => ({ ...prev, ...patch }));
         onPatchNode(id, patch);
       } catch {
         /* aborted or network */
@@ -222,7 +230,7 @@ function InspectorNodeEditor({
       window.clearTimeout(timer);
       ac.abort();
     };
-  }, [draft.videoUrl, draft.nodeType, id, node.data.videoUrl, onPatchNode]);
+  }, [draft.videoUrl, draft.nodeType, id, onPatchNode]);
 
   return (
     <aside className="flex h-full w-[340px] shrink-0 flex-col border-l border-zinc-800 bg-zinc-950/95">

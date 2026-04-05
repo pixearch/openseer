@@ -26,6 +26,7 @@ import { OpenSeerNode } from "@/components/openseer/OpenSeerNode";
 import { RadialCreateNodeMenu } from "@/components/openseer/RadialCreateNodeMenu";
 import { TextNodeEditModal } from "@/components/openseer/TextNodeEditModal";
 import { createGitOnboardingSeed, SEED_GRAPH_ID, SEED_GRAPH_NAME } from "@/data/seed-git-onboarding";
+import { openDocumentUrl } from "@/lib/document-open";
 import {
   createEmptyNodeData,
   GROUP_STANDARD_HEIGHT,
@@ -654,7 +655,7 @@ function GraphWorkspaceInner() {
     if (node.data.nodeType === "document") {
       const raw = node.data.documentUrl;
       const u = typeof raw === "string" ? raw.trim() : "";
-      if (u) window.open(u, "_blank", "noopener,noreferrer");
+      if (u) void openDocumentUrl(u);
     }
   }, []);
 

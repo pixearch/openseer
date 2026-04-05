@@ -9,6 +9,12 @@ export function parseYoutubeVideoId(raw: string): string | null {
       const id = u.pathname.replace(/^\//, "").split("/")[0];
       return /^[\w-]{11}$/.test(id) ? id : null;
     }
+    if (host === "music.youtube.com") {
+      if (u.pathname.startsWith("/watch")) {
+        const id = u.searchParams.get("v");
+        return id && /^[\w-]{11}$/.test(id) ? id : null;
+      }
+    }
     if (host === "youtube.com" || host === "m.youtube.com") {
       if (u.pathname.startsWith("/watch")) {
         const id = u.searchParams.get("v");
@@ -27,7 +33,7 @@ export function parseYoutubeVideoId(raw: string): string | null {
     /* relative or invalid URL */
   }
   const m = s.match(
-    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/
+    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|music\.youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11})/
   );
   return m?.[1] ?? null;
 }
