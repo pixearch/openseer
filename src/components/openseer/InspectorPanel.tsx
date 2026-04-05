@@ -1,8 +1,9 @@
 "use client";
 
 import type { Edge, Node } from "@xyflow/react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDebouncedPatchNode } from "@/hooks/use-debounced-graph-patch";
+import { parseYoutubeVideoId } from "@/lib/youtube";
 import type { OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
 import { OPEN_SEER_STATUSES } from "@/lib/types/graph";
 
@@ -160,6 +161,50 @@ function InspectorNodeEditor({
   };
 
   const tagsStr = draft.tags.join(", ");
+
+  const videoAutofillFirstDebounceRef = useRef(true);
+
+  useEffect(() => {
+    if (draft.nodeType !== "video") return;
+    const ac = new AbortController();
+    const timer = window.setTimeout(async () => {
+      const u = (draft.videoUrl ?? "").trim();
+      if (videoAutofillFirstDebounceRef.current) {
+        videoAutofillFirstDebounceRef.current = false;
+        if (u === (node.data.videoUrl ?? "").trim()) return;
+      }
+      if (!parseYoutubeVideoId(u)) return;
+      try {
+        const r = await fetch(`/api/youtube-metadata?url=${encodeURIComponent(u)}`, {
+          signal: ac.signal,
+        });
+        if (!r.ok) return;
+        const meta = (await r.json()) as {
+          title?: string;
+          shortDescription?: string;
+          videoPublishedAt?: string;
+          videoDurationLabel?: string;
+        };
+        if (ac.signal.aborted) return;
+        const patch: Partial<OpenSeerNodeData> = {
+          title: typeof meta.title === "string" ? meta.title : "",
+          shortDescription: typeof meta.shortDescription === "string" ? meta.shortDescription : "",
+          videoPublishedAt:
+            typeof meta.videoPublishedAt === "string" ? meta.videoPublishedAt : "",
+          videoDurationLabel:
+            typeof meta.videoDurationLabel === "string" ? meta.videoDurationLabel : "",
+        };
+        setDraft((d) => ({ ...d, ...patch }));
+        onPatchNode(id, patch);
+      } catch {
+        /* aborted or network */
+      }
+    }, 600);
+    return () => {
+      window.clearTimeout(timer);
+      ac.abort();
+    };
+  }, [draft.videoUrl, draft.nodeType, id, node.data.videoUrl, onPatchNode]);
 
   return (
     <aside className="flex h-full w-[340px] shrink-0 flex-col border-l border-zinc-800 bg-zinc-950/95">
@@ -476,6 +521,22 @@ function InspectorNodeEditor({
                 className={inputClass}
                 value={draft.videoUrl ?? ""}
                 onChange={(e) => applyDebounced({ videoUrl: e.target.value })}
+              />
+            </Field>
+            <Field label="Published">
+              <input
+                className={inputClass}
+                type="date"
+                value={draft.videoPublishedAt ?? ""}
+                onChange={(e) => applyDebounced({ videoPublishedAt: e.target.value })}
+              />
+            </Field>
+            <Field label="Duration">
+              <input
+                className={inputClass}
+                value={draft.videoDurationLabel ?? ""}
+                onChange={(e) => applyDebounced({ videoDurationLabel: e.target.value })}
+                placeholder="e.g. 12:34"
               />
             </Field>
             <Field label="Caption">

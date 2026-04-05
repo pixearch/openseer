@@ -31,44 +31,7 @@ import {
   NODE_TYPE_LABEL,
 } from "@/lib/node-type-meta";
 import type { OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
-
-/** YouTube watch/embed/shorts and youtu.be — used for a static thumbnail in the node card. */
-function youtubeVideoId(raw: string): string | null {
-  const s = raw.trim();
-  if (!s) return null;
-  try {
-    const u = new URL(s);
-    const host = u.hostname.replace(/^www\./, "");
-    if (host === "youtu.be") {
-      const id = u.pathname.replace(/^\//, "").split("/")[0];
-      return /^[\w-]{11}$/.test(id) ? id : null;
-    }
-    if (host === "youtube.com" || host === "m.youtube.com") {
-      if (u.pathname.startsWith("/watch")) {
-        const id = u.searchParams.get("v");
-        return id && /^[\w-]{11}$/.test(id) ? id : null;
-      }
-      if (u.pathname.startsWith("/embed/")) {
-        const id = u.pathname.slice(7).split("/")[0];
-        return /^[\w-]{11}$/.test(id) ? id : null;
-      }
-      if (u.pathname.startsWith("/shorts/")) {
-        const id = u.pathname.slice(8).split("/")[0];
-        return /^[\w-]{11}$/.test(id) ? id : null;
-      }
-    }
-  } catch {
-    /* relative or invalid URL */
-  }
-  const m = s.match(
-    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/
-  );
-  return m?.[1] ?? null;
-}
-
-function youtubeThumbnailUrl(videoId: string): string {
-  return `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-}
+import { parseYoutubeVideoId, youtubeThumbnailUrl } from "@/lib/youtube";
 
 function thumbnailNodeSize(n: Node<OpenSeerNodeData>): { w: number; h: number } {
   if (typeof n.width === "number" && typeof n.height === "number") {
@@ -186,6 +149,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   const w = typeof props.width === "number" ? props.width : undefined;
   const h = typeof props.height === "number" ? props.height : undefined;
   const [lightbox, setLightbox] = useState(false);
+  const [videoLightbox, setVideoLightbox] = useState(false);
   const [imgCtxMenu, setImgCtxMenu] = useState<{ clientX: number; clientY: number } | null>(null);
   const { setNodes } = useReactFlow();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -525,7 +489,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         )
       );
     };
-    const ytId = data.videoUrl ? youtubeVideoId(data.videoUrl) : null;
+    const ytId = data.videoUrl ? parseYoutubeVideoId(data.videoUrl) : null;
 
     return (
       <>
@@ -591,8 +555,10 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             </div>
           </div>
           {data.videoUrl ? (
-            <div
-              className="flex min-h-0 w-full flex-1 items-center justify-center bg-zinc-950"
+            <button
+              type="button"
+              className="flex min-h-0 w-full flex-1 cursor-zoom-in items-center justify-center bg-zinc-950 focus:outline-none"
+              onClick={() => setVideoLightbox(true)}
               onDragOver={onVideoDragOver}
               onDrop={onVideoDrop}
             >
@@ -600,21 +566,21 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
                 <>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={youtubeThumbnailUrl(ytId)}
+                    src={youtubeThumbnailUrl(ytId, "hq")}
                     alt=""
                     className="max-h-full max-w-full object-contain"
                   />
                 </>
               ) : (
                 <video
-                  className="max-h-full max-w-full object-contain"
+                  className="max-h-full max-w-full object-contain pointer-events-none"
                   src={data.videoUrl}
                   muted
                   playsInline
                   preload="metadata"
                 />
               )}
-            </div>
+            </button>
           ) : (
             <div
               className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 bg-zinc-950 px-2 text-center text-xs text-zinc-600"
@@ -630,6 +596,44 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
           />
         </div>
+        {videoLightbox && data.videoUrl && typeof document !== "undefined"
+          ? createPortal(
+              <button
+                type="button"
+                className="fixed inset-0 z-[300] flex cursor-default items-center justify-center bg-black/85 p-4"
+                onClick={() => setVideoLightbox(false)}
+                aria-label="Close video preview"
+              >
+                <div
+                  className="flex max-h-[90vh] max-w-[90vw] flex-col items-center gap-3"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {ytId ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={youtubeThumbnailUrl(ytId, "hq")}
+                        alt=""
+                        className="max-h-[80vh] max-w-full object-contain"
+                      />
+                    </>
+                  ) : (
+                    <video
+                      className="max-h-[80vh] max-w-full object-contain"
+                      src={data.videoUrl}
+                      controls
+                      playsInline
+                      preload="metadata"
+                    />
+                  )}
+                  <p className="max-w-[90vw] text-center text-sm font-medium text-zinc-100">
+                    {data.title}
+                  </p>
+                </div>
+              </button>,
+              document.body
+            )
+          : null}
       </>
     );
   }

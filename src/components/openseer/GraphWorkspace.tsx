@@ -17,7 +17,7 @@ import {
   SelectionMode,
   useReactFlow,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { Connection, Edge, EdgeChange, Node, NodeChange, NodeMouseHandler } from "@xyflow/react";
 import { GraphSidebar } from "@/components/openseer/GraphSidebar";
@@ -128,6 +128,11 @@ function GraphWorkspaceInner() {
     multiNodeIds: string[] | null;
   }>({ nodeId: null, edgeId: null, multiNodeIds: null });
 
+  const selectionRef = useRef(selection);
+  useLayoutEffect(() => {
+    selectionRef.current = selection;
+  }, [selection]);
+
   const groupPathKey = groupPath.join("|");
 
   const view = useMemo(
@@ -227,6 +232,61 @@ function GraphWorkspaceInner() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [ctxMenu, screenToFlowPosition]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target;
+      if (
+        el instanceof HTMLElement &&
+        (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
+      ) {
+        return;
+      }
+      if (ctxMenu) return;
+
+      const k = e.key.length === 1 ? e.key.toLowerCase() : "";
+
+      if (k === "f") {
+        if (focusMode) {
+          e.preventDefault();
+          setFocusMode(false);
+          return;
+        }
+        if (!graphPointerInside.current) return;
+        e.preventDefault();
+        setFocusMode(true);
+        return;
+      }
+
+      if (!graphPointerInside.current) return;
+
+      if (k === "e") {
+        e.preventDefault();
+        void fitView({ padding: 0.12, duration: 250, maxZoom: 2 });
+        return;
+      }
+
+      if (k === "z") {
+        const sel = selectionRef.current;
+        const ids =
+          sel.multiNodeIds && sel.multiNodeIds.length > 0
+            ? sel.multiNodeIds
+            : sel.nodeId
+              ? [sel.nodeId]
+              : [];
+        if (ids.length === 0) return;
+        e.preventDefault();
+        void fitView({
+          nodes: ids.map((id) => ({ id })),
+          padding: 0.08,
+          duration: 250,
+          maxZoom: 2,
+        });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ctxMenu, fitView, focusMode]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<Node<OpenSeerNodeData>>[]) => {

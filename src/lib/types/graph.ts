@@ -65,6 +65,10 @@ export interface OpenSeerNodeData {
   sourceLink?: string;
   caption?: string;
 
+  /** Video node: publish date (YYYY-MM-DD), duration label — e.g. YouTube autofill */
+  videoPublishedAt?: string;
+  videoDurationLabel?: string;
+
   // Cost
   estimatedCost?: string;
   actualCost?: string;
