@@ -24,14 +24,24 @@ import { GraphSidebar } from "@/components/openseer/GraphSidebar";
 import { InspectorPanel } from "@/components/openseer/InspectorPanel";
 import { OpenSeerNode } from "@/components/openseer/OpenSeerNode";
 import { createGitOnboardingSeed, SEED_GRAPH_ID, SEED_GRAPH_NAME } from "@/data/seed-git-onboarding";
-import { createEmptyNodeData } from "@/lib/default-node";
 import {
+  createEmptyNodeData,
+  GROUP_STANDARD_HEIGHT,
+  GROUP_STANDARD_WIDTH,
+  NODE_STANDARD_HEIGHT,
+  NODE_STANDARD_WIDTH,
+} from "@/lib/default-node";
+import {
+  clampFrameChildrenEverywhere,
+  clampFrameChildrenPositions,
   getViewGraph,
   groupSelectedNodes,
   patchNestedGraph,
   titlesAlongPath,
+  ungroupFrame,
+  ungroupNodeFromFrame,
 } from "@/lib/graph/nested-graph";
-import { minimapColorForNodeType } from "@/lib/node-type-meta";
+import { minimapColorForNodeType, NODE_TYPE_LABEL } from "@/lib/node-type-meta";
 import {
   documentFromState,
   loadGraphDocument,
@@ -39,7 +49,7 @@ import {
 } from "@/lib/services/graph-storage";
 import { clampFixedMenuPosition } from "@/lib/ui/clamp-context-menu";
 import type { OpenSeerEdgeData, OpenSeerNodeData, OpenSeerNodeType } from "@/lib/types/graph";
-import { OPEN_SEER_NODE_TYPES } from "@/lib/types/graph";
+import { ADD_NODE_MENU_TYPES, OPEN_SEER_NODE_TYPES } from "@/lib/types/graph";
 
 const nodeTypes = { openSeer: OpenSeerNode };
 
@@ -50,8 +60,8 @@ const defaultEdgeOptions = {
 };
 
 const CTX_MENU_W = 208;
-const CTX_MENU_H_PANE = 420;
-const CTX_MENU_H_NODES = 140;
+const CTX_MENU_H_PANE = 400;
+const CTX_MENU_H_NODES = 220;
 
 type CtxMenu =
   | {
@@ -66,6 +76,8 @@ type CtxMenu =
       clientX: number;
       clientY: number;
       selectedIds: string[];
+      /** Node that was right-clicked (or first of a multi-selection). */
+      anchorNodeId: string;
     };
 
 function GraphWorkspaceInner() {
@@ -101,13 +113,16 @@ function GraphWorkspaceInner() {
       const saved = loadGraphDocument();
       if (saved) {
         setDoc({
-          nodes: saved.nodes as Node<OpenSeerNodeData>[],
+          nodes: clampFrameChildrenEverywhere(saved.nodes as Node<OpenSeerNodeData>[]),
           edges: saved.edges as Edge<OpenSeerEdgeData>[],
         });
         setGraphMeta({ id: saved.id, name: saved.name });
       } else {
         const seed = createGitOnboardingSeed();
-        setDoc({ nodes: seed.nodes, edges: seed.edges });
+        setDoc({
+          nodes: clampFrameChildrenEverywhere(seed.nodes),
+          edges: seed.edges,
+        });
         setGraphMeta({ id: SEED_GRAPH_ID, name: SEED_GRAPH_NAME });
         saveGraphDocument(
           documentFromState(SEED_GRAPH_NAME, SEED_GRAPH_ID, seed.nodes, seed.edges)
@@ -154,9 +169,10 @@ function GraphWorkspaceInner() {
       setDoc((d) => {
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const nn = applyNodeChanges(changes, v.nodes);
-        if (groupPath.length === 0) return { nodes: nn, edges: d.edges };
+        const clamped = clampFrameChildrenPositions(nn);
+        if (groupPath.length === 0) return { nodes: clamped, edges: d.edges };
         return {
-          nodes: patchNestedGraph(d.nodes, groupPath, nn, v.edges),
+          nodes: patchNestedGraph(d.nodes, groupPath, clamped, v.edges),
           edges: d.edges,
         };
       });
@@ -339,7 +355,7 @@ function GraphWorkspaceInner() {
 
   const onLoadDemo = useCallback(() => {
     const seed = createGitOnboardingSeed();
-    setDoc({ nodes: seed.nodes, edges: seed.edges });
+    setDoc({ nodes: clampFrameChildrenEverywhere(seed.nodes), edges: seed.edges });
     setGraphMeta({ id: SEED_GRAPH_ID, name: SEED_GRAPH_NAME });
     setGroupPath([]);
     setSelection({ nodeId: null, edgeId: null });
@@ -360,6 +376,7 @@ function GraphWorkspaceInner() {
       const id = `n-${crypto.randomUUID()}`;
       setDoc((d) => {
         const v = getViewGraph(d.nodes, d.edges, groupPath);
+        const isGroup = nodeType === "group";
         const nextNodes = [
           ...v.nodes,
           {
@@ -370,6 +387,8 @@ function GraphWorkspaceInner() {
               y: position.y + (Math.random() - 0.5) * 80,
             },
             data: createEmptyNodeData(nodeType),
+            width: isGroup ? GROUP_STANDARD_WIDTH : NODE_STANDARD_WIDTH,
+            height: isGroup ? GROUP_STANDARD_HEIGHT : NODE_STANDARD_HEIGHT,
           },
         ];
         if (groupPath.length === 0) return { nodes: nextNodes, edges: d.edges };
@@ -437,6 +456,7 @@ function GraphWorkspaceInner() {
         clientX: e.clientX,
         clientY: e.clientY,
         selectedIds,
+        anchorNodeId: node.id,
       });
     },
     [getNodes]
@@ -451,6 +471,7 @@ function GraphWorkspaceInner() {
         clientX: e.clientX,
         clientY: e.clientY,
         selectedIds,
+        anchorNodeId: selectedIds[0] ?? "",
       });
     },
     []
@@ -482,6 +503,47 @@ function GraphWorkspaceInner() {
       };
     });
   }, [ctxMenu, groupPath]);
+
+  const runUngroupAll = useCallback(() => {
+    if (!ctxMenu || ctxMenu.kind !== "nodes") return;
+    const frameId = ctxMenu.anchorNodeId;
+    setCtxMenu(null);
+    setDoc((d) => {
+      const v = getViewGraph(d.nodes, d.edges, groupPath);
+      const u = ungroupFrame(v.nodes, v.edges, frameId);
+      if (!u) return d;
+      if (groupPath.length === 0) return { nodes: u.nodes, edges: u.edges };
+      return {
+        nodes: patchNestedGraph(d.nodes, groupPath, u.nodes, u.edges),
+        edges: d.edges,
+      };
+    });
+  }, [ctxMenu, groupPath]);
+
+  const runUngroupNode = useCallback(() => {
+    if (!ctxMenu || ctxMenu.kind !== "nodes") return;
+    const nodeId = ctxMenu.anchorNodeId;
+    setCtxMenu(null);
+    setDoc((d) => {
+      const v = getViewGraph(d.nodes, d.edges, groupPath);
+      const u = ungroupNodeFromFrame(v.nodes, v.edges, nodeId);
+      if (!u) return d;
+      if (groupPath.length === 0) return { nodes: u.nodes, edges: u.edges };
+      return {
+        nodes: patchNestedGraph(d.nodes, groupPath, u.nodes, u.edges),
+        edges: d.edges,
+      };
+    });
+  }, [ctxMenu, groupPath]);
+
+  const ctxMenuAnchorNode = useMemo(() => {
+    if (!ctxMenu || ctxMenu.kind !== "nodes") return null;
+    return view.nodes.find((n) => n.id === ctxMenu.anchorNodeId) ?? null;
+  }, [ctxMenu, view.nodes]);
+
+  const ctxParentIsFrame =
+    ctxMenuAnchorNode?.parentId != null &&
+    view.nodes.find((p) => p.id === ctxMenuAnchorNode.parentId)?.data.nodeType === "frame";
 
   const crumbTitles = useMemo(() => titlesAlongPath(doc.nodes, groupPath), [doc.nodes, groupPath]);
 
@@ -616,7 +678,7 @@ function GraphWorkspaceInner() {
             })()}
           >
             {ctxMenu.kind === "pane" ? (
-              OPEN_SEER_NODE_TYPES.map((t) => (
+              ADD_NODE_MENU_TYPES.map((t) => (
                 <button
                   key={t}
                   type="button"
@@ -626,23 +688,42 @@ function GraphWorkspaceInner() {
                     setCtxMenu(null);
                   }}
                 >
-                  {t === "howto" ? "How-To" : t}
+                  {NODE_TYPE_LABEL[t]}
                 </button>
               ))
             ) : (
               <>
-                {ctxMenu.selectedIds.length >= 2 ? (
+                {ctxMenuAnchorNode?.data.nodeType === "frame" ? (
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                    onClick={runUngroupAll}
+                  >
+                    Ungroup all
+                  </button>
+                ) : null}
+                {ctxMenuAnchorNode && ctxParentIsFrame ? (
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                    onClick={runUngroupNode}
+                  >
+                    Ungroup node
+                  </button>
+                ) : null}
+                {ctxMenu.selectedIds.length >= 2 &&
+                ctxMenuAnchorNode?.data.nodeType !== "frame" ? (
                   <button
                     type="button"
                     className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
                     onClick={runGroupSelection}
                   >
-                    Group selection
+                    Group nodes
                   </button>
                 ) : null}
                 <p className="px-3 py-1 text-[11px] text-zinc-600">
                   {ctxMenu.selectedIds.length < 2
-                    ? "Select 2+ nodes (Shift-click) to group."
+                    ? "Select 2+ nodes (Shift-click) to group nodes together."
                     : ""}
                 </p>
               </>

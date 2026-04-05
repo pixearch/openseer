@@ -3,6 +3,13 @@ import { DEFAULT_TITLE_BY_TYPE } from "@/lib/node-type-meta";
 
 export { DEFAULT_TITLE_BY_TYPE } from "@/lib/node-type-meta";
 
+/** Default node box size (also minimum when resizing). */
+export const NODE_STANDARD_WIDTH = 260;
+export const NODE_STANDARD_HEIGHT = 180;
+
+export const GROUP_STANDARD_WIDTH = 320;
+export const GROUP_STANDARD_HEIGHT = 200;
+
 export function createEmptyNodeData(nodeType: OpenSeerNodeType): OpenSeerNodeData {
   const base: OpenSeerNodeData = {
     nodeType,

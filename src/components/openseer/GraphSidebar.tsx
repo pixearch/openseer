@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { NODE_TYPE_LABEL } from "@/lib/node-type-meta";
 import type { OpenSeerNodeType } from "@/lib/types/graph";
-import { OPEN_SEER_NODE_TYPES } from "@/lib/types/graph";
+import { ADD_NODE_MENU_TYPES, OPEN_SEER_NODE_TYPES } from "@/lib/types/graph";
 
 interface GraphSidebarProps {
   graphName: string;
@@ -56,7 +56,7 @@ export function GraphSidebar({
                 onClick={closeMenu}
               />
               <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-[min(70vh,320px)] overflow-y-auto rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl">
-                {OPEN_SEER_NODE_TYPES.map((t) => (
+                {ADD_NODE_MENU_TYPES.map((t) => (
                   <button
                     key={t}
                     type="button"

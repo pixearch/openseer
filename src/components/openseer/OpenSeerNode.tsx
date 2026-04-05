@@ -1,6 +1,14 @@
 "use client";
 
-import { Handle, Position, useReactFlow, type Node, type NodeProps } from "@xyflow/react";
+import {
+  Handle,
+  NodeResizer,
+  Position,
+  useReactFlow,
+  type Edge,
+  type Node,
+  type NodeProps,
+} from "@xyflow/react";
 import {
   memo,
   useCallback,
@@ -10,8 +18,122 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { NODE_TYPE_ACCENT_CLASS, NODE_TYPE_LABEL } from "@/lib/node-type-meta";
-import type { OpenSeerNodeData } from "@/lib/types/graph";
+import {
+  GROUP_STANDARD_HEIGHT,
+  GROUP_STANDARD_WIDTH,
+  NODE_STANDARD_HEIGHT,
+  NODE_STANDARD_WIDTH,
+} from "@/lib/default-node";
+import { FRAME_HEADER_RESERVE_PX } from "@/lib/graph/frame-chrome";
+import {
+  minimapColorForNodeType,
+  NODE_TYPE_ACCENT_CLASS,
+  NODE_TYPE_LABEL,
+} from "@/lib/node-type-meta";
+import type { OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
+
+function thumbnailNodeSize(n: Node<OpenSeerNodeData>): { w: number; h: number } {
+  if (typeof n.width === "number" && typeof n.height === "number") {
+    return { w: n.width, h: n.height };
+  }
+  if (n.data.nodeType === "group") {
+    return { w: GROUP_STANDARD_WIDTH, h: GROUP_STANDARD_HEIGHT };
+  }
+  return { w: NODE_STANDARD_WIDTH, h: NODE_STANDARD_HEIGHT };
+}
+
+function NestedGraphThumbnail({
+  nodes,
+  edges = [],
+}: {
+  nodes: Node<OpenSeerNodeData>[];
+  edges?: Edge<OpenSeerEdgeData>[];
+}) {
+  if (nodes.length === 0) {
+    return (
+      <div className="flex h-full min-h-[72px] w-full items-center justify-center rounded-md border border-zinc-800/90 bg-zinc-950/60">
+        <p className="text-center text-[10px] text-zinc-600">Empty subgraph</p>
+      </div>
+    );
+  }
+
+  const items = nodes.map((n) => {
+    const { w, h } = thumbnailNodeSize(n);
+    const x = n.position.x;
+    const y = n.position.y;
+    return {
+      id: n.id,
+      x,
+      y,
+      w,
+      h,
+      nt: n.data.nodeType,
+      cx: x + w / 2,
+      cy: y + h / 2,
+    };
+  });
+
+  const minX = Math.min(...items.map((b) => b.x));
+  const minY = Math.min(...items.map((b) => b.y));
+  const maxX = Math.max(...items.map((b) => b.x + b.w));
+  const maxY = Math.max(...items.map((b) => b.y + b.h));
+  const bw = Math.max(maxX - minX, 1);
+  const bh = Math.max(maxY - minY, 1);
+  const pad = Math.max(bw, bh) * 0.08;
+  const vbX = minX - pad;
+  const vbY = minY - pad;
+  const vbW = bw + pad * 2;
+  const vbH = bh + pad * 2;
+  const stroke = Math.max(vbW, vbH) * 0.0035;
+  const nodeById = new Map(items.map((i) => [i.id, i]));
+
+  return (
+    <div className="h-full min-h-[72px] w-full overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-950/90 shadow-[inset_0_1px_0_rgb(39_39_42/0.5)]">
+      <svg
+        width="100%"
+        height="100%"
+        viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
+        preserveAspectRatio="xMidYMid meet"
+        className="block"
+        aria-hidden
+      >
+        {edges.map((e) => {
+          const s = nodeById.get(e.source);
+          const t = nodeById.get(e.target);
+          if (!s || !t) return null;
+          return (
+            <line
+              key={e.id}
+              x1={s.cx}
+              y1={s.cy}
+              x2={t.cx}
+              y2={t.cy}
+              stroke="#64748b"
+              strokeWidth={stroke * 1.2}
+              strokeLinecap="round"
+              opacity={0.9}
+            />
+          );
+        })}
+        {items.map((b) => (
+          <rect
+            key={b.id}
+            x={b.x}
+            y={b.y}
+            width={b.w}
+            height={b.h}
+            rx={stroke * 3}
+            ry={stroke * 3}
+            fill={minimapColorForNodeType(b.nt)}
+            stroke="#18181b"
+            strokeWidth={stroke}
+            opacity={0.97}
+          />
+        ))}
+      </svg>
+    </div>
+  );
+}
 
 const STATUS_DOT: Record<string, string> = {
   draft: "bg-zinc-500",
@@ -62,31 +184,94 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   const previewTags = data.tags.slice(0, 2);
   const moreTags = data.tags.length > 2 ? data.tags.length - 2 : 0;
 
-  if (data.nodeType === "group") {
-    const gw = w ?? 320;
-    const gh = h ?? 200;
+  const resizerGroup = (
+    <NodeResizer
+      isVisible={selected}
+      minWidth={GROUP_STANDARD_WIDTH}
+      minHeight={GROUP_STANDARD_HEIGHT}
+      handleClassName="!h-2 !w-2 !rounded-sm !border !border-zinc-500 !bg-zinc-800"
+      lineClassName="!border-zinc-500"
+      color="#71717a"
+    />
+  );
+
+  const resizerStandard = (
+    <NodeResizer
+      isVisible={selected}
+      minWidth={NODE_STANDARD_WIDTH}
+      minHeight={NODE_STANDARD_HEIGHT}
+      handleClassName="!h-2 !w-2 !rounded-sm !border !border-zinc-500 !bg-zinc-800"
+      lineClassName="!border-zinc-500"
+      color="#71717a"
+    />
+  );
+
+  if (data.nodeType === "frame") {
+    const fw = w ?? NODE_STANDARD_WIDTH;
+    const fh = h ?? NODE_STANDARD_HEIGHT;
     return (
       <div
         className={[
-          "flex flex-col rounded-lg border-2 border-dashed border-teal-600/70 bg-zinc-950/90 shadow-lg",
+          "flex min-h-0 flex-col rounded-lg border-2 border-dashed border-slate-500/80 bg-zinc-950/40 shadow-lg",
           selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
         ].join(" ")}
-        style={{ width: gw, minHeight: gh }}
+        style={{ width: fw, height: fh }}
       >
+        {resizerStandard}
         <Handle
           type="target"
           position={Position.Left}
           className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
         />
-        <div className="border-b border-teal-900/50 bg-teal-950/40 px-2 py-1.5">
+        <div
+          className="box-border flex shrink-0 flex-col justify-center gap-0.5 overflow-hidden border-b border-slate-800/80 bg-slate-950/50 px-2 py-1 leading-tight"
+          style={{ height: FRAME_HEADER_RESERVE_PX }}
+        >
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            {typeLabel}
+          </span>
+          <div className="truncate text-sm font-semibold text-zinc-100">{data.title}</div>
+        </div>
+        <div className="min-h-0 flex-1 rounded-b-md bg-transparent" />
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
+        />
+      </div>
+    );
+  }
+
+  if (data.nodeType === "group") {
+    const gw = w ?? GROUP_STANDARD_WIDTH;
+    const gh = h ?? GROUP_STANDARD_HEIGHT;
+    const nested = (data.nestedGraph?.nodes ?? []) as Node<OpenSeerNodeData>[];
+    const nestedEdges = (data.nestedGraph?.edges ?? []) as Edge<OpenSeerEdgeData>[];
+    return (
+      <div
+        className={[
+          "flex min-h-0 flex-col rounded-lg border-2 border-dashed border-teal-600/70 bg-zinc-950/90 shadow-lg",
+          selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
+        ].join(" ")}
+        style={{ width: gw, height: gh }}
+      >
+        {resizerGroup}
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
+        />
+        <div className="shrink-0 border-b border-teal-900/50 bg-teal-950/40 px-2 py-1.5">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-teal-400/90">
             {typeLabel}
           </span>
           <div className="mt-0.5 truncate text-sm font-semibold text-zinc-100">{data.title}</div>
         </div>
-        <div className="flex flex-1 flex-col justify-center px-3 py-2 text-center">
-          <p className="text-[11px] text-zinc-500">Nested graph</p>
-          <p className="text-[10px] text-zinc-600">Double-click to open</p>
+        <div className="flex min-h-0 flex-1 flex-col gap-1 px-2 pb-2 pt-1">
+          <div className="min-h-[96px] min-w-0 flex-1">
+            <NestedGraphThumbnail nodes={nested} edges={nestedEdges} />
+          </div>
+          <p className="shrink-0 text-center text-[10px] text-zinc-600">Double-click to open</p>
         </div>
         <Handle
           type="source"
@@ -125,23 +310,25 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         />
         <div
           className={[
-            "min-w-[200px] max-w-[260px] overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
+            "flex min-h-0 flex-col overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
             "border-l-[3px]",
             accent,
             selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
           ].join(" ")}
+          style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
           onContextMenu={(e: ReactMouseEvent) => {
             e.preventDefault();
             e.stopPropagation();
             setImgCtxMenu({ clientX: e.clientX, clientY: e.clientY });
           }}
         >
+          {resizerStandard}
           <Handle
             type="target"
             position={Position.Left}
             className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
           />
-          <div className="flex items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
             <div className="min-w-0 flex-1">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
                 {typeLabel}
@@ -159,7 +346,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           {data.imageUrl ? (
             <button
               type="button"
-              className="block w-full cursor-zoom-in focus:outline-none"
+              className="flex min-h-0 w-full flex-1 cursor-zoom-in items-center justify-center bg-zinc-950 focus:outline-none"
               onClick={() => setLightbox(true)}
               onDragOver={onImageDragOver}
               onDrop={onImageDrop}
@@ -168,12 +355,12 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
               <img
                 src={data.imageUrl}
                 alt=""
-                className="h-28 w-full object-cover"
+                className="max-h-full max-w-full object-contain"
               />
             </button>
           ) : (
             <div
-              className="flex h-28 flex-col items-center justify-center gap-1 bg-zinc-950 px-2 text-center text-xs text-zinc-600"
+              className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 bg-zinc-950 px-2 text-center text-xs text-zinc-600"
               onDragOver={onImageDragOver}
               onDrop={onImageDrop}
             >
@@ -253,12 +440,14 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
     return (
       <div
         className={[
-          "min-w-[200px] max-w-[260px] overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
+          "overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
           "border-l-[3px]",
           accent,
           selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
         ].join(" ")}
+        style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
       >
+        {resizerStandard}
         <Handle
           type="target"
           position={Position.Left}
@@ -295,12 +484,14 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   return (
     <div
       className={[
-        "min-w-[220px] max-w-[280px] rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg backdrop-blur-sm",
+        "rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg backdrop-blur-sm",
         "border-l-[3px]",
         accent,
         selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
       ].join(" ")}
+      style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
     >
+      {resizerStandard}
       <Handle
         type="target"
         position={Position.Left}
