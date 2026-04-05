@@ -6,30 +6,35 @@ import type { OpenSeerNodeType } from "@/lib/types/graph";
 import { GRAPH_WORKSPACE_NODE_TYPE_LIST } from "@/lib/types/graph";
 
 const R = 100;
-const LABELS = GRAPH_WORKSPACE_NODE_TYPE_LIST.map((t) => NODE_TYPE_LABEL[t]);
 
-/** atan2(dy, dx); returns sector 0–3: Text (up), Image (right), Video (down), Grouping (left). */
-function sectorAt(dx: number, dy: number): number {
+const WEDGE_FILL: { base: string; active: string }[] = [
+  { base: "rgb(39 39 42)", active: "rgb(63 63 70)" },
+  { base: "rgb(91 33 182 / 0.28)", active: "rgb(91 33 182 / 0.55)" },
+  { base: "rgb(14 165 233 / 0.22)", active: "rgb(14 165 233 / 0.45)" },
+  { base: "rgb(245 158 11 / 0.22)", active: "rgb(245 158 11 / 0.45)" },
+  { base: "rgb(20 184 166 / 0.25)", active: "rgb(20 184 166 / 0.5)" },
+];
+
+function sectorAt(dx: number, dy: number, n: number): number {
   const a = Math.atan2(dy, dx);
-  if (a >= (-3 * Math.PI) / 4 && a < -Math.PI / 4) return 0;
-  if (a >= -Math.PI / 4 && a < Math.PI / 4) return 1;
-  if (a >= Math.PI / 4 && a < (3 * Math.PI) / 4) return 2;
-  return 3;
+  let t = a + Math.PI / 2;
+  while (t < 0) t += 2 * Math.PI;
+  while (t >= 2 * Math.PI) t -= 2 * Math.PI;
+  const sweep = (2 * Math.PI) / n;
+  const s = Math.floor(t / sweep);
+  return Math.min(n - 1, Math.max(0, s));
 }
 
-function wedgePath(i: number): string {
-  const starts = [-3 * Math.PI / 4, -Math.PI / 4, Math.PI / 4, (3 * Math.PI) / 4];
-  const a0 = starts[i];
-  const a1 = starts[i] + Math.PI / 2;
+function wedgePath(i: number, n: number): string {
+  const sweep = (2 * Math.PI) / n;
+  const a0 = -Math.PI / 2 + i * sweep;
+  const a1 = a0 + sweep;
   const x0 = Math.cos(a0) * R;
   const y0 = Math.sin(a0) * R;
   const x1 = Math.cos(a1) * R;
   const y1 = Math.sin(a1) * R;
   return `M 0 0 L ${x0} ${y0} A ${R} ${R} 0 0 1 ${x1} ${y1} Z`;
 }
-
-const labelAngles = [-Math.PI / 2, 0, Math.PI / 2, Math.PI];
-const labelRadius = 62;
 
 export function RadialCreateNodeMenu({
   onPick,
@@ -40,26 +45,37 @@ export function RadialCreateNodeMenu({
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<number | null>(null);
+  const types = GRAPH_WORKSPACE_NODE_TYPE_LIST;
+  const n = types.length;
+  const labels = types.map((t) => NODE_TYPE_LABEL[t]);
 
   const paths = useMemo(
-    () => [0, 1, 2, 3].map((i) => ({ i, d: wedgePath(i) })),
-    []
+    () => types.map((_, i) => ({ i, d: wedgePath(i, n) })),
+    [n, types]
   );
 
-  const updateHover = useCallback((clientX: number, clientY: number) => {
-    const el = rootRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const dx = clientX - cx;
-    const dy = clientY - cy;
-    if (Math.hypot(dx, dy) < 18) {
-      setHovered(null);
-      return;
-    }
-    setHovered(sectorAt(dx, dy));
-  }, []);
+  const labelAngles = useMemo(() => {
+    const sweep = (2 * Math.PI) / n;
+    return types.map((_, i) => -Math.PI / 2 + (i + 0.5) * sweep);
+  }, [n, types]);
+
+  const updateHover = useCallback(
+    (clientX: number, clientY: number) => {
+      const el = rootRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const dx = clientX - cx;
+      const dy = clientY - cy;
+      if (Math.hypot(dx, dy) < 18) {
+        setHovered(null);
+        return;
+      }
+      setHovered(sectorAt(dx, dy, n));
+    },
+    [n]
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -71,6 +87,8 @@ export function RadialCreateNodeMenu({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const labelRadius = 62;
 
   return (
     <div
@@ -99,22 +117,8 @@ export function RadialCreateNodeMenu({
           </defs>
           {paths.map(({ i, d }) => {
             const active = hovered === i;
-            const fill =
-              i === 0
-                ? active
-                  ? "rgb(63 63 70)"
-                  : "rgb(39 39 42)"
-                : i === 1
-                  ? active
-                    ? "rgb(91 33 182 / 0.55)"
-                    : "rgb(91 33 182 / 0.28)"
-                  : i === 2
-                    ? active
-                      ? "rgb(14 165 233 / 0.45)"
-                      : "rgb(14 165 233 / 0.22)"
-                    : active
-                      ? "rgb(20 184 166 / 0.5)"
-                      : "rgb(20 184 166 / 0.25)";
+            const pal = WEDGE_FILL[i % WEDGE_FILL.length];
+            const fill = active ? pal.active : pal.base;
             return (
               <path
                 key={i}
@@ -124,7 +128,7 @@ export function RadialCreateNodeMenu({
                 strokeWidth={active ? 2.2 : 1}
                 className="cursor-pointer transition-[fill,stroke-width] duration-100"
                 style={{ filter: active ? "url(#radial-glow)" : undefined }}
-                onClick={() => onPick(GRAPH_WORKSPACE_NODE_TYPE_LIST[i])}
+                onClick={() => onPick(types[i])}
               />
             );
           })}
@@ -144,7 +148,7 @@ export function RadialCreateNodeMenu({
                   opacity: hovered === null || hovered === i ? 1 : 0.35,
                 }}
               >
-                {LABELS[i]}
+                {labels[i]}
               </text>
             );
           })}

@@ -25,7 +25,9 @@ import {
   NODE_STANDARD_WIDTH,
 } from "@/lib/default-node";
 import { FRAME_HEADER_RESERVE_PX } from "@/lib/graph/frame-chrome";
+import { documentPreviewMeta, openDocumentUrl } from "@/lib/document-open";
 import {
+  DEFAULT_TITLE_BY_TYPE,
   minimapColorForNodeType,
   NODE_TYPE_ACCENT_CLASS,
   NODE_TYPE_LABEL,
@@ -154,6 +156,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   const { setNodes } = useReactFlow();
   const fileRef = useRef<HTMLInputElement>(null);
   const videoFileRef = useRef<HTMLInputElement>(null);
+  const documentFileRef = useRef<HTMLInputElement>(null);
 
   const applyImageFromFile = useCallback(
     (file: File) => {
@@ -193,6 +196,48 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         );
       };
       reader.readAsDataURL(file);
+    },
+    [id, setNodes]
+  );
+
+  const applyDocumentFromFile = useCallback(
+    (file: File) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = reader.result as string;
+        setNodes((nodes) =>
+          nodes.map((n) =>
+            n.id === id ? { ...n, data: { ...n.data, documentUrl: url } } : n
+          )
+        );
+      };
+      reader.readAsDataURL(file);
+    },
+    [id, setNodes]
+  );
+
+  const maybeAutofillYoutubeMeta = useCallback(
+    (videoUrl: string) => {
+      const trimmed = videoUrl.trim();
+      if (!parseYoutubeVideoId(trimmed)) return;
+      void fetch(`/api/youtube-metadata?url=${encodeURIComponent(trimmed)}`).then(async (r) => {
+        if (!r.ok) return;
+        const meta = (await r.json()) as { title?: string; author?: string };
+        setNodes((nodes) =>
+          nodes.map((n) => {
+            if (n.id !== id) return n;
+            const t = String(n.data.title ?? "").trim();
+            if (t && t !== DEFAULT_TITLE_BY_TYPE.video) return n;
+            const next: Partial<OpenSeerNodeData> = {};
+            if (typeof meta.title === "string" && meta.title) next.title = meta.title;
+            if (typeof meta.author === "string" && meta.author && !String(n.data.owner ?? "").trim()) {
+              next.owner = meta.author;
+            }
+            if (Object.keys(next).length === 0) return n;
+            return { ...n, data: { ...n.data, ...next } };
+          })
+        );
+      });
     },
     [id, setNodes]
   );
@@ -477,6 +522,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             n.id === id ? { ...n, data: { ...n.data, videoUrl: trimmed } } : n
           )
         );
+        maybeAutofillYoutubeMeta(trimmed);
       }
     };
     const promptVideoUrl = () => {
@@ -488,6 +534,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           n.id === id ? { ...n, data: { ...n.data, videoUrl: trimmed } } : n
         )
       );
+      maybeAutofillYoutubeMeta(trimmed);
     };
     const ytId = data.videoUrl ? parseYoutubeVideoId(data.videoUrl) : null;
 
@@ -634,6 +681,180 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
               document.body
             )
           : null}
+      </>
+    );
+  }
+
+  if (data.nodeType === "document") {
+    const onDocDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const onDocDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const f = e.dataTransfer.files[0];
+      if (f) {
+        applyDocumentFromFile(f);
+        return;
+      }
+      const uri = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
+      const trimmed = uri.trim();
+      if (trimmed) {
+        setNodes((nodes) =>
+          nodes.map((n) =>
+            n.id === id ? { ...n, data: { ...n.data, documentUrl: trimmed } } : n
+          )
+        );
+      }
+    };
+    const promptDocumentUrl = () => {
+      const next = window.prompt("Document URL", data.documentUrl?.trim() ?? "");
+      if (next === null) return;
+      const trimmed = next.trim();
+      setNodes((nodes) =>
+        nodes.map((n) =>
+          n.id === id ? { ...n, data: { ...n.data, documentUrl: trimmed } } : n
+        )
+      );
+    };
+    const docUrl = data.documentUrl?.trim() ?? "";
+    const canDownload = Boolean(docUrl);
+    const docPreview = docUrl ? documentPreviewMeta(docUrl) : null;
+
+    return (
+      <>
+        <input
+          ref={documentFileRef}
+          type="file"
+          className="hidden"
+          aria-hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) applyDocumentFromFile(f);
+            e.target.value = "";
+          }}
+        />
+        <div
+          className={[
+            "flex min-h-0 flex-col overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
+            "border-l-[3px]",
+            accent,
+            selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
+          ].join(" ")}
+          style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
+        >
+          {resizerStandard}
+          <Handle
+            type="target"
+            position={Position.Left}
+            className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
+          />
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
+            <div className="min-w-0 flex-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                {typeLabel}
+              </span>
+              <div className="truncate text-sm font-medium text-zinc-100">{data.title}</div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800"
+                onClick={() => documentFileRef.current?.click()}
+              >
+                Load…
+              </button>
+              <button
+                type="button"
+                className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800"
+                onClick={promptDocumentUrl}
+              >
+                URL…
+              </button>
+              {docUrl ? (
+                <button
+                  type="button"
+                  className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800"
+                  onClick={() => void openDocumentUrl(docUrl)}
+                >
+                  Open
+                </button>
+              ) : null}
+              {canDownload ? (
+                <a
+                  href={docUrl}
+                  download
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800"
+                >
+                  Download
+                </a>
+              ) : null}
+            </div>
+          </div>
+          <div
+            className="flex min-h-0 flex-1 flex-col items-stretch justify-center gap-2 bg-zinc-950 px-3 py-2"
+            onDragOver={onDocDragOver}
+            onDrop={onDocDrop}
+          >
+            {docUrl && docPreview ? (
+              <div className="flex min-h-[88px] w-full flex-col gap-2 rounded-md border border-amber-900/45 bg-zinc-900/90 p-2.5">
+                <div className="flex items-start gap-2.5">
+                  <svg
+                    className="h-10 w-8 shrink-0 text-amber-500/90"
+                    viewBox="0 0 40 48"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    aria-hidden
+                  >
+                    <path d="M8 4h16l8 8v32H8z" strokeLinejoin="round" />
+                    <path d="M24 4v12h8" strokeLinejoin="round" />
+                    <path d="M12 28h16M12 34h10" strokeLinecap="round" />
+                  </svg>
+                  <div className="min-w-0 flex-1 text-left">
+                    <p className="text-xs font-semibold text-amber-100/95">{docPreview.typeLabel}</p>
+                    <p className="mt-0.5 truncate text-[10px] text-zinc-500" title={docPreview.detail}>
+                      {docPreview.detail}
+                    </p>
+                    {!docUrl.startsWith("data:") ? (
+                      <p
+                        className="mt-1 line-clamp-2 break-all text-[10px] text-zinc-600"
+                        title={docUrl}
+                      >
+                        {docUrl}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+                <p className="text-[10px] text-zinc-600">Double-click or use Open to view</p>
+              </div>
+            ) : (
+              <>
+                <svg
+                  className="mx-auto h-14 w-11 shrink-0 text-amber-500/85"
+                  viewBox="0 0 40 48"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden
+                >
+                  <path d="M8 4h16l8 8v32H8z" strokeLinejoin="round" />
+                  <path d="M24 4v12h8" strokeLinejoin="round" />
+                  <path d="M12 28h16M12 34h10" strokeLinecap="round" />
+                </svg>
+                <p className="text-center text-xs text-zinc-600">Set document URL or drop a file</p>
+              </>
+            )}
+          </div>
+          <Handle
+            type="source"
+            position={Position.Right}
+            className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
+          />
+        </div>
       </>
     );
   }
