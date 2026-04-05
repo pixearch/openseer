@@ -15,17 +15,19 @@ export const OPEN_SEER_NODE_TYPES = [
   "decision",
   "image",
   "video",
+  "document",
   "frame",
   "group",
 ] as const;
 
 export type OpenSeerNodeType = (typeof OPEN_SEER_NODE_TYPES)[number];
 
-/** Creation menu + visibility toggles in the graph workspace (four types only). */
+/** Creation menu + visibility toggles in the graph workspace. */
 export const GRAPH_WORKSPACE_NODE_TYPE_LIST: OpenSeerNodeType[] = [
   "text",
   "image",
   "video",
+  "document",
   "group",
 ];
 
@@ -62,10 +64,12 @@ export interface OpenSeerNodeData {
   // Evidence
   imageUrl?: string;
   videoUrl?: string;
+  /** Document node: URL or data URL from a linked file */
+  documentUrl?: string;
   sourceLink?: string;
   caption?: string;
 
-  /** Video node: publish date (YYYY-MM-DD), duration label — e.g. YouTube autofill */
+  /** Video node: publish date (YYYY-MM-DD), duration label — editable; not from oEmbed */
   videoPublishedAt?: string;
   videoDurationLabel?: string;
 

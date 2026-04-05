@@ -24,6 +24,7 @@ import { GraphSidebar } from "@/components/openseer/GraphSidebar";
 import { InspectorPanel } from "@/components/openseer/InspectorPanel";
 import { OpenSeerNode } from "@/components/openseer/OpenSeerNode";
 import { RadialCreateNodeMenu } from "@/components/openseer/RadialCreateNodeMenu";
+import { TextNodeEditModal } from "@/components/openseer/TextNodeEditModal";
 import { createGitOnboardingSeed, SEED_GRAPH_ID, SEED_GRAPH_NAME } from "@/data/seed-git-onboarding";
 import {
   createEmptyNodeData,
@@ -127,6 +128,7 @@ function GraphWorkspaceInner() {
     edgeId: string | null;
     multiNodeIds: string[] | null;
   }>({ nodeId: null, edgeId: null, multiNodeIds: null });
+  const [textEditNodeId, setTextEditNodeId] = useState<string | null>(null);
 
   const selectionRef = useRef(selection);
   useLayoutEffect(() => {
@@ -362,6 +364,9 @@ function GraphWorkspaceInner() {
   );
 
   const onNodesDelete = useCallback((deleted: Node<OpenSeerNodeData>[]) => {
+    if (textEditNodeId && deleted.some((n) => n.id === textEditNodeId)) {
+      setTextEditNodeId(null);
+    }
     setSelection((s) => {
       const cleared = { nodeId: null, edgeId: null, multiNodeIds: null as string[] | null };
       if (s.nodeId && deleted.some((n) => n.id === s.nodeId)) return cleared;
@@ -375,7 +380,7 @@ function GraphWorkspaceInner() {
       }
       return s;
     });
-  }, []);
+  }, [textEditNodeId]);
 
   const onEdgesDelete = useCallback((deleted: Edge<OpenSeerEdgeData>[]) => {
     setSelection((s) =>
@@ -467,6 +472,7 @@ function GraphWorkspaceInner() {
 
   const onDeleteNode = useCallback(
     (id: string) => {
+      setTextEditNodeId((tid) => (tid === id ? null : tid));
       setDoc((d) => {
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const nn = v.nodes.filter((n) => n.id !== id);
@@ -634,16 +640,23 @@ function GraphWorkspaceInner() {
     []
   );
 
-  const onNodeDoubleClick: NodeMouseHandler = useCallback(
-    (_e, node) => {
-      if (node.data.nodeType === "group") {
-        setGroupPath((p) => [...p, node.id]);
-        setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
-        initialFitDone.current = false;
-      }
-    },
-    []
-  );
+  const onNodeDoubleClick: NodeMouseHandler = useCallback((_e, node) => {
+    if (node.data.nodeType === "group") {
+      setGroupPath((p) => [...p, node.id]);
+      setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
+      initialFitDone.current = false;
+      return;
+    }
+    if (node.data.nodeType === "text") {
+      setTextEditNodeId(node.id);
+      return;
+    }
+    if (node.data.nodeType === "document") {
+      const raw = node.data.documentUrl;
+      const u = typeof raw === "string" ? raw.trim() : "";
+      if (u) window.open(u, "_blank", "noopener,noreferrer");
+    }
+  }, []);
 
   const runGroupSelection = useCallback(() => {
     if (!ctxMenu || ctxMenu.kind !== "nodes") return;
@@ -938,6 +951,12 @@ function GraphWorkspaceInner() {
           onDeleteEdge={onDeleteEdge}
         />
       ) : null}
+      <TextNodeEditModal
+        nodeId={textEditNodeId}
+        nodes={view.nodes}
+        onPatchNode={onPatchNode}
+        onClose={() => setTextEditNodeId(null)}
+      />
     </div>
   );
 }

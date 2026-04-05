@@ -162,6 +162,33 @@ function InspectorNodeEditor({
 
   const tagsStr = draft.tags.join(", ");
 
+  const prevVideoUrlRef = useRef(node.data.videoUrl ?? "");
+  useEffect(() => {
+    if (node.data.nodeType !== "video") return;
+    const next = node.data.videoUrl ?? "";
+    if (next === prevVideoUrlRef.current) return;
+    prevVideoUrlRef.current = next;
+    setDraft((d) => ({ ...d, videoUrl: next }));
+  }, [node.data.videoUrl, node.data.nodeType, node.id]);
+
+  const prevTextBodyRef = useRef(node.data.shortDescription ?? "");
+  useEffect(() => {
+    if (node.data.nodeType !== "text") return;
+    const next = node.data.shortDescription ?? "";
+    if (next === prevTextBodyRef.current) return;
+    prevTextBodyRef.current = next;
+    setDraft((d) => ({ ...d, shortDescription: next }));
+  }, [node.data.shortDescription, node.data.nodeType, node.id]);
+
+  const prevDocumentUrlRef = useRef(node.data.documentUrl ?? "");
+  useEffect(() => {
+    if (node.data.nodeType !== "document") return;
+    const next = node.data.documentUrl ?? "";
+    if (next === prevDocumentUrlRef.current) return;
+    prevDocumentUrlRef.current = next;
+    setDraft((d) => ({ ...d, documentUrl: next }));
+  }, [node.data.documentUrl, node.data.nodeType, node.id]);
+
   const videoAutofillFirstDebounceRef = useRef(true);
 
   useEffect(() => {
@@ -179,21 +206,12 @@ function InspectorNodeEditor({
           signal: ac.signal,
         });
         if (!r.ok) return;
-        const meta = (await r.json()) as {
-          title?: string;
-          shortDescription?: string;
-          videoPublishedAt?: string;
-          videoDurationLabel?: string;
-        };
+        const meta = (await r.json()) as { title?: string; author?: string };
         if (ac.signal.aborted) return;
-        const patch: Partial<OpenSeerNodeData> = {
-          title: typeof meta.title === "string" ? meta.title : "",
-          shortDescription: typeof meta.shortDescription === "string" ? meta.shortDescription : "",
-          videoPublishedAt:
-            typeof meta.videoPublishedAt === "string" ? meta.videoPublishedAt : "",
-          videoDurationLabel:
-            typeof meta.videoDurationLabel === "string" ? meta.videoDurationLabel : "",
-        };
+        const patch: Partial<OpenSeerNodeData> = {};
+        if (typeof meta.title === "string" && meta.title) patch.title = meta.title;
+        if (typeof meta.author === "string" && meta.author) patch.owner = meta.author;
+        if (Object.keys(patch).length === 0) return;
         setDraft((d) => ({ ...d, ...patch }));
         onPatchNode(id, patch);
       } catch {
@@ -218,7 +236,9 @@ function InspectorNodeEditor({
                 ? "Group nodes"
                 : draft.nodeType === "text"
                   ? "Text"
-                  : draft.nodeType}
+                  : draft.nodeType === "document"
+                    ? "Document"
+                    : draft.nodeType}
         </h2>
         <p className="mt-0.5 truncate text-xs text-zinc-500" title={draft.title}>
           {draft.title}
@@ -236,8 +256,16 @@ function InspectorNodeEditor({
           <textarea
             className={textareaClass}
             value={draft.shortDescription}
-            onChange={(e) => applyDebounced({ shortDescription: e.target.value })}
-            rows={3}
+            onChange={(e) => {
+              const v = e.target.value;
+              setDraft((d) => ({ ...d, shortDescription: v }));
+              if (node.data.nodeType === "text") {
+                onPatchNode(id, { shortDescription: v });
+              } else {
+                scheduleNodePatch({ shortDescription: v });
+              }
+            }}
+            rows={draft.nodeType === "text" ? 6 : 3}
           />
         </Field>
         <Field label="Status">
@@ -537,6 +565,29 @@ function InspectorNodeEditor({
                 value={draft.videoDurationLabel ?? ""}
                 onChange={(e) => applyDebounced({ videoDurationLabel: e.target.value })}
                 placeholder="e.g. 12:34"
+              />
+            </Field>
+            <Field label="Caption">
+              <textarea
+                className={textareaClass}
+                value={draft.caption ?? ""}
+                onChange={(e) => applyDebounced({ caption: e.target.value })}
+                rows={2}
+              />
+            </Field>
+          </>
+        ) : null}
+
+        {draft.nodeType === "document" ? (
+          <>
+            <hr className="border-zinc-800" />
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Document</p>
+            <Field label="Document URL">
+              <input
+                className={inputClass}
+                value={draft.documentUrl ?? ""}
+                onChange={(e) => applyDebounced({ documentUrl: e.target.value })}
+                placeholder="https://… or linked file"
               />
             </Field>
             <Field label="Caption">

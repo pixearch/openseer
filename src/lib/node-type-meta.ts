@@ -17,6 +17,7 @@ export const NODE_TYPE_LABEL: Record<OpenSeerNodeType, string> = {
   decision: "Decision",
   image: "Image",
   video: "Video",
+  document: "Document",
   frame: "Group Nodes",
   group: "Grouping",
 };
@@ -38,6 +39,7 @@ export const NODE_TYPE_ACCENT_CLASS: Record<OpenSeerNodeType, string> = {
   decision: "border-l-indigo-500",
   image: "border-l-fuchsia-500",
   video: "border-l-cyan-400",
+  document: "border-l-amber-500",
   frame: "border-l-slate-400",
   group: "border-l-teal-400",
 };
@@ -59,6 +61,7 @@ export const NODE_TYPE_MINIMAP_COLOR: Record<OpenSeerNodeType, string> = {
   decision: "#6366f1",
   image: "#a78bfa",
   video: "#38bdf8",
+  document: "#f59e0b",
   frame: "#94a3b8",
   group: "#22d3ee",
 };
@@ -79,6 +82,7 @@ export const DEFAULT_TITLE_BY_TYPE: Record<OpenSeerNodeType, string> = {
   decision: "New decision",
   image: "New image",
   video: "New video",
+  document: "New document",
   frame: "New group nodes",
   group: "New grouping",
 };
