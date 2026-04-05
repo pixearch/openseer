@@ -1,7 +1,14 @@
 "use client";
 
 import { Handle, Position, useReactFlow, type Node, type NodeProps } from "@xyflow/react";
-import { memo, useCallback, useRef, useState, type DragEvent } from "react";
+import {
+  memo,
+  useCallback,
+  useRef,
+  useState,
+  type DragEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { createPortal } from "react-dom";
 import { NODE_TYPE_ACCENT_CLASS, NODE_TYPE_LABEL } from "@/lib/node-type-meta";
 import type { OpenSeerNodeData } from "@/lib/types/graph";
@@ -19,6 +26,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   const w = typeof props.width === "number" ? props.width : undefined;
   const h = typeof props.height === "number" ? props.height : undefined;
   const [lightbox, setLightbox] = useState(false);
+  const [imgCtxMenu, setImgCtxMenu] = useState<{ clientX: number; clientY: number } | null>(null);
   const { setNodes } = useReactFlow();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -38,6 +46,14 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
     },
     [id, setNodes]
   );
+
+  const clearImage = useCallback(() => {
+    setNodes((nodes) =>
+      nodes.map((n) =>
+        n.id === id ? { ...n, data: { ...n.data, imageUrl: "" } } : n
+      )
+    );
+  }, [id, setNodes]);
 
   const accent = NODE_TYPE_ACCENT_CLASS[data.nodeType];
   const typeLabel = NODE_TYPE_LABEL[data.nodeType];
@@ -114,6 +130,11 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             accent,
             selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
           ].join(" ")}
+          onContextMenu={(e: ReactMouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setImgCtxMenu({ clientX: e.clientX, clientY: e.clientY });
+          }}
         >
           <Handle
             type="target"
@@ -181,6 +202,46 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
                   onClick={(e) => e.stopPropagation()}
                 />
               </button>,
+              document.body
+            )
+          : null}
+        {imgCtxMenu && typeof document !== "undefined"
+          ? createPortal(
+              <>
+                <button
+                  type="button"
+                  className="fixed inset-0 z-[280] cursor-default bg-transparent"
+                  aria-label="Close menu"
+                  onClick={() => setImgCtxMenu(null)}
+                />
+                <div
+                  className="fixed z-[281] w-44 rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
+                  style={{ left: imgCtxMenu.clientX, top: imgCtxMenu.clientY }}
+                >
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                    onClick={() => {
+                      setImgCtxMenu(null);
+                      fileRef.current?.click();
+                    }}
+                  >
+                    Replace image…
+                  </button>
+                  {data.imageUrl ? (
+                    <button
+                      type="button"
+                      className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                      onClick={() => {
+                        setImgCtxMenu(null);
+                        clearImage();
+                      }}
+                    >
+                      Delete image
+                    </button>
+                  ) : null}
+                </div>
+              </>,
               document.body
             )
           : null}
