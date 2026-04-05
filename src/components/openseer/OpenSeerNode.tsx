@@ -1,6 +1,13 @@
 "use client";
 
-import { Handle, Position, useReactFlow, type Node, type NodeProps } from "@xyflow/react";
+import {
+  Handle,
+  NodeResizer,
+  Position,
+  useReactFlow,
+  type Node,
+  type NodeProps,
+} from "@xyflow/react";
 import {
   memo,
   useCallback,
@@ -10,6 +17,12 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import {
+  GROUP_STANDARD_HEIGHT,
+  GROUP_STANDARD_WIDTH,
+  NODE_STANDARD_HEIGHT,
+  NODE_STANDARD_WIDTH,
+} from "@/lib/default-node";
 import { NODE_TYPE_ACCENT_CLASS, NODE_TYPE_LABEL } from "@/lib/node-type-meta";
 import type { OpenSeerNodeData } from "@/lib/types/graph";
 
@@ -62,17 +75,40 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   const previewTags = data.tags.slice(0, 2);
   const moreTags = data.tags.length > 2 ? data.tags.length - 2 : 0;
 
+  const resizerGroup = (
+    <NodeResizer
+      isVisible={selected}
+      minWidth={GROUP_STANDARD_WIDTH}
+      minHeight={GROUP_STANDARD_HEIGHT}
+      handleClassName="!h-2 !w-2 !rounded-sm !border !border-zinc-500 !bg-zinc-800"
+      lineClassName="!border-zinc-500"
+      color="#71717a"
+    />
+  );
+
+  const resizerStandard = (
+    <NodeResizer
+      isVisible={selected}
+      minWidth={NODE_STANDARD_WIDTH}
+      minHeight={NODE_STANDARD_HEIGHT}
+      handleClassName="!h-2 !w-2 !rounded-sm !border !border-zinc-500 !bg-zinc-800"
+      lineClassName="!border-zinc-500"
+      color="#71717a"
+    />
+  );
+
   if (data.nodeType === "group") {
-    const gw = w ?? 320;
-    const gh = h ?? 200;
+    const gw = w ?? GROUP_STANDARD_WIDTH;
+    const gh = h ?? GROUP_STANDARD_HEIGHT;
     return (
       <div
         className={[
           "flex flex-col rounded-lg border-2 border-dashed border-teal-600/70 bg-zinc-950/90 shadow-lg",
           selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
         ].join(" ")}
-        style={{ width: gw, minHeight: gh }}
+        style={{ width: gw, height: gh }}
       >
+        {resizerGroup}
         <Handle
           type="target"
           position={Position.Left}
@@ -125,17 +161,19 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         />
         <div
           className={[
-            "min-w-[200px] max-w-[260px] overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
+            "overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
             "border-l-[3px]",
             accent,
             selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
           ].join(" ")}
+          style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
           onContextMenu={(e: ReactMouseEvent) => {
             e.preventDefault();
             e.stopPropagation();
             setImgCtxMenu({ clientX: e.clientX, clientY: e.clientY });
           }}
         >
+          {resizerStandard}
           <Handle
             type="target"
             position={Position.Left}
@@ -253,12 +291,14 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
     return (
       <div
         className={[
-          "min-w-[200px] max-w-[260px] overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
+          "overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
           "border-l-[3px]",
           accent,
           selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
         ].join(" ")}
+        style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
       >
+        {resizerStandard}
         <Handle
           type="target"
           position={Position.Left}
@@ -295,12 +335,14 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   return (
     <div
       className={[
-        "min-w-[220px] max-w-[280px] rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg backdrop-blur-sm",
+        "rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg backdrop-blur-sm",
         "border-l-[3px]",
         accent,
         selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
       ].join(" ")}
+      style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
     >
+      {resizerStandard}
       <Handle
         type="target"
         position={Position.Left}

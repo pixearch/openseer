@@ -24,7 +24,13 @@ import { GraphSidebar } from "@/components/openseer/GraphSidebar";
 import { InspectorPanel } from "@/components/openseer/InspectorPanel";
 import { OpenSeerNode } from "@/components/openseer/OpenSeerNode";
 import { createGitOnboardingSeed, SEED_GRAPH_ID, SEED_GRAPH_NAME } from "@/data/seed-git-onboarding";
-import { createEmptyNodeData } from "@/lib/default-node";
+import {
+  createEmptyNodeData,
+  GROUP_STANDARD_HEIGHT,
+  GROUP_STANDARD_WIDTH,
+  NODE_STANDARD_HEIGHT,
+  NODE_STANDARD_WIDTH,
+} from "@/lib/default-node";
 import {
   getViewGraph,
   groupSelectedNodes,
@@ -360,6 +366,7 @@ function GraphWorkspaceInner() {
       const id = `n-${crypto.randomUUID()}`;
       setDoc((d) => {
         const v = getViewGraph(d.nodes, d.edges, groupPath);
+        const isGroup = nodeType === "group";
         const nextNodes = [
           ...v.nodes,
           {
@@ -370,6 +377,8 @@ function GraphWorkspaceInner() {
               y: position.y + (Math.random() - 0.5) * 80,
             },
             data: createEmptyNodeData(nodeType),
+            width: isGroup ? GROUP_STANDARD_WIDTH : NODE_STANDARD_WIDTH,
+            height: isGroup ? GROUP_STANDARD_HEIGHT : NODE_STANDARD_HEIGHT,
           },
         ];
         if (groupPath.length === 0) return { nodes: nextNodes, edges: d.edges };
