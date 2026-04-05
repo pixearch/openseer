@@ -25,14 +25,16 @@ import {
   NODE_STANDARD_WIDTH,
 } from "@/lib/default-node";
 import { FRAME_HEADER_RESERVE_PX } from "@/lib/graph/frame-chrome";
+import { CodeEditorTextarea } from "@/components/openseer/CodeEditorTextarea";
 import { documentPreviewMeta, openDocumentUrl } from "@/lib/document-open";
+import { copyAllCodeBlocks, newCodeBlockId, normalizeCodeBlocksForDisplay } from "@/lib/code-blocks";
 import {
   DEFAULT_TITLE_BY_TYPE,
   minimapColorForNodeType,
   NODE_TYPE_ACCENT_CLASS,
   NODE_TYPE_LABEL,
 } from "@/lib/node-type-meta";
-import type { OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
+import type { CodeBlockEntry, OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
 import { parseYoutubeVideoId, youtubeThumbnailUrl } from "@/lib/youtube";
 
 function thumbnailNodeSize(n: Node<OpenSeerNodeData>): { w: number; h: number } {
@@ -856,6 +858,136 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           />
         </div>
       </>
+    );
+  }
+
+  if (data.nodeType === "code") {
+    const blocks = normalizeCodeBlocksForDisplay(id, data.codeBlocks);
+    const patchBlocks = (next: CodeBlockEntry[]) => {
+      setNodes((nodes) =>
+        nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, codeBlocks: next } } : n))
+      );
+    };
+    const copyAll = () => void navigator.clipboard.writeText(copyAllCodeBlocks(blocks));
+
+    const copyIcon = (
+      <svg
+        className="h-3.5 w-3.5"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        aria-hidden
+      >
+        <rect x="9" y="9" width="11" height="11" rx="2" />
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+      </svg>
+    );
+
+    const trashIcon = (
+      <svg
+        className="h-3.5 w-3.5"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        aria-hidden
+      >
+        <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14" />
+      </svg>
+    );
+
+    return (
+      <div
+        className={[
+          "flex min-h-0 flex-col overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
+          "border-l-[3px]",
+          accent,
+          selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
+        ].join(" ")}
+        style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
+      >
+        {resizerStandard}
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
+        />
+        <div className="flex shrink-0 flex-col gap-1 border-b border-zinc-800/80 px-2 py-1.5">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                {typeLabel}
+              </span>
+              <div className="truncate text-sm font-semibold text-zinc-100">{data.title}</div>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+              <button
+                type="button"
+                className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800"
+                onClick={() => void copyAll()}
+              >
+                Copy all
+              </button>
+              <button
+                type="button"
+                className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800"
+                onClick={() =>
+                  patchBlocks([...blocks, { id: newCodeBlockId(), content: "" }])
+                }
+              >
+                + Block
+              </button>
+            </div>
+          </div>
+          <p className="text-[9px] text-zinc-600">Double-click node for full editor</p>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 py-2">
+          {blocks.map((block) => (
+            <div
+              key={block.id}
+              className="flex min-h-0 gap-1 rounded border border-zinc-800/90 bg-zinc-950/60 p-1"
+            >
+              <CodeEditorTextarea
+                value={block.content}
+                onChange={(content) =>
+                  patchBlocks(blocks.map((b) => (b.id === block.id ? { ...b, content } : b)))
+                }
+                className="min-h-[52px] min-w-0 flex-1 resize-y rounded border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-zinc-100 focus:border-emerald-700 focus:outline-none focus:ring-1 focus:ring-emerald-700"
+              />
+              <div className="flex shrink-0 flex-col gap-0.5">
+                <button
+                  type="button"
+                  className="flex h-7 w-7 items-center justify-center rounded border border-zinc-600 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                  title="Copy block"
+                  aria-label="Copy block"
+                  onClick={() => void navigator.clipboard.writeText(block.content)}
+                >
+                  {copyIcon}
+                </button>
+                <button
+                  type="button"
+                  disabled={blocks.length <= 1}
+                  className="flex h-7 w-7 items-center justify-center rounded border border-zinc-600 text-zinc-400 hover:bg-rose-950/60 hover:text-rose-200 disabled:opacity-40"
+                  title="Delete block"
+                  aria-label="Delete block"
+                  onClick={() => {
+                    if (blocks.length <= 1) return;
+                    patchBlocks(blocks.filter((b) => b.id !== block.id));
+                  }}
+                >
+                  {trashIcon}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
+        />
+      </div>
     );
   }
 

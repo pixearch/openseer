@@ -1,6 +1,7 @@
 /** All node kinds (workspace + legacy stored graphs). */
 export const OPEN_SEER_NODE_TYPES = [
   "text",
+  "code",
   "proposal",
   "program",
   "project",
@@ -25,6 +26,7 @@ export type OpenSeerNodeType = (typeof OPEN_SEER_NODE_TYPES)[number];
 /** Creation menu + visibility toggles in the graph workspace. */
 export const GRAPH_WORKSPACE_NODE_TYPE_LIST: OpenSeerNodeType[] = [
   "text",
+  "code",
   "image",
   "video",
   "document",
@@ -40,6 +42,11 @@ export const OPEN_SEER_STATUSES = [
 ] as const;
 
 export type OpenSeerStatus = (typeof OPEN_SEER_STATUSES)[number];
+
+export interface CodeBlockEntry {
+  id: string;
+  content: string;
+}
 
 /** Payload stored on each React Flow node (`data`). Neo4j-friendly flat fields. */
 export interface OpenSeerNodeData {
@@ -92,6 +99,9 @@ export interface OpenSeerNodeData {
   rationale?: string;
   decisionDate?: string;
   outcome?: string;
+
+  /** Code node: ordered editable blocks */
+  codeBlocks?: CodeBlockEntry[];
 
   /** Nested graph for `group` nodes */
   nestedGraph?: {

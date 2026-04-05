@@ -24,6 +24,7 @@ import { GraphSidebar } from "@/components/openseer/GraphSidebar";
 import { InspectorPanel } from "@/components/openseer/InspectorPanel";
 import { OpenSeerNode } from "@/components/openseer/OpenSeerNode";
 import { RadialCreateNodeMenu } from "@/components/openseer/RadialCreateNodeMenu";
+import { CodeNodeEditModal } from "@/components/openseer/CodeNodeEditModal";
 import { TextNodeEditModal } from "@/components/openseer/TextNodeEditModal";
 import { createGitOnboardingSeed, SEED_GRAPH_ID, SEED_GRAPH_NAME } from "@/data/seed-git-onboarding";
 import { openDocumentUrl } from "@/lib/document-open";
@@ -130,6 +131,7 @@ function GraphWorkspaceInner() {
     multiNodeIds: string[] | null;
   }>({ nodeId: null, edgeId: null, multiNodeIds: null });
   const [textEditNodeId, setTextEditNodeId] = useState<string | null>(null);
+  const [codeEditNodeId, setCodeEditNodeId] = useState<string | null>(null);
 
   const selectionRef = useRef(selection);
   useLayoutEffect(() => {
@@ -368,6 +370,9 @@ function GraphWorkspaceInner() {
     if (textEditNodeId && deleted.some((n) => n.id === textEditNodeId)) {
       setTextEditNodeId(null);
     }
+    if (codeEditNodeId && deleted.some((n) => n.id === codeEditNodeId)) {
+      setCodeEditNodeId(null);
+    }
     setSelection((s) => {
       const cleared = { nodeId: null, edgeId: null, multiNodeIds: null as string[] | null };
       if (s.nodeId && deleted.some((n) => n.id === s.nodeId)) return cleared;
@@ -381,7 +386,7 @@ function GraphWorkspaceInner() {
       }
       return s;
     });
-  }, [textEditNodeId]);
+  }, [textEditNodeId, codeEditNodeId]);
 
   const onEdgesDelete = useCallback((deleted: Edge<OpenSeerEdgeData>[]) => {
     setSelection((s) =>
@@ -474,6 +479,7 @@ function GraphWorkspaceInner() {
   const onDeleteNode = useCallback(
     (id: string) => {
       setTextEditNodeId((tid) => (tid === id ? null : tid));
+      setCodeEditNodeId((cid) => (cid === id ? null : cid));
       setDoc((d) => {
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const nn = v.nodes.filter((n) => n.id !== id);
@@ -650,6 +656,10 @@ function GraphWorkspaceInner() {
     }
     if (node.data.nodeType === "text") {
       setTextEditNodeId(node.id);
+      return;
+    }
+    if (node.data.nodeType === "code") {
+      setCodeEditNodeId(node.id);
       return;
     }
     if (node.data.nodeType === "document") {
@@ -957,6 +967,12 @@ function GraphWorkspaceInner() {
         nodes={view.nodes}
         onPatchNode={onPatchNode}
         onClose={() => setTextEditNodeId(null)}
+      />
+      <CodeNodeEditModal
+        nodeId={codeEditNodeId}
+        nodes={view.nodes}
+        onPatchNode={onPatchNode}
+        onClose={() => setCodeEditNodeId(null)}
       />
     </div>
   );
