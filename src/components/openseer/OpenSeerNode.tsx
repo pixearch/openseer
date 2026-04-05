@@ -32,6 +32,44 @@ import {
 } from "@/lib/node-type-meta";
 import type { OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
 
+/** YouTube watch/embed/shorts and youtu.be — used for a static thumbnail in the node card. */
+function youtubeVideoId(raw: string): string | null {
+  const s = raw.trim();
+  if (!s) return null;
+  try {
+    const u = new URL(s);
+    const host = u.hostname.replace(/^www\./, "");
+    if (host === "youtu.be") {
+      const id = u.pathname.replace(/^\//, "").split("/")[0];
+      return /^[\w-]{11}$/.test(id) ? id : null;
+    }
+    if (host === "youtube.com" || host === "m.youtube.com") {
+      if (u.pathname.startsWith("/watch")) {
+        const id = u.searchParams.get("v");
+        return id && /^[\w-]{11}$/.test(id) ? id : null;
+      }
+      if (u.pathname.startsWith("/embed/")) {
+        const id = u.pathname.slice(7).split("/")[0];
+        return /^[\w-]{11}$/.test(id) ? id : null;
+      }
+      if (u.pathname.startsWith("/shorts/")) {
+        const id = u.pathname.slice(8).split("/")[0];
+        return /^[\w-]{11}$/.test(id) ? id : null;
+      }
+    }
+  } catch {
+    /* relative or invalid URL */
+  }
+  const m = s.match(
+    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/
+  );
+  return m?.[1] ?? null;
+}
+
+function youtubeThumbnailUrl(videoId: string): string {
+  return `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+}
+
 function thumbnailNodeSize(n: Node<OpenSeerNodeData>): { w: number; h: number } {
   if (typeof n.width === "number" && typeof n.height === "number") {
     return { w: n.width, h: n.height };
@@ -151,6 +189,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   const [imgCtxMenu, setImgCtxMenu] = useState<{ clientX: number; clientY: number } | null>(null);
   const { setNodes } = useReactFlow();
   const fileRef = useRef<HTMLInputElement>(null);
+  const videoFileRef = useRef<HTMLInputElement>(null);
 
   const applyImageFromFile = useCallback(
     (file: File) => {
@@ -176,6 +215,23 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
       )
     );
   }, [id, setNodes]);
+
+  const applyVideoFromFile = useCallback(
+    (file: File) => {
+      if (!file.type.startsWith("video/")) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = reader.result as string;
+        setNodes((nodes) =>
+          nodes.map((n) =>
+            n.id === id ? { ...n, data: { ...n.data, videoUrl: url } } : n
+          )
+        );
+      };
+      reader.readAsDataURL(file);
+    },
+    [id, setNodes]
+  );
 
   const accent = NODE_TYPE_ACCENT_CLASS[data.nodeType];
   const typeLabel = NODE_TYPE_LABEL[data.nodeType];
@@ -437,49 +493,148 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   }
 
   if (data.nodeType === "video") {
+    const onVideoDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const onVideoDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const f = e.dataTransfer.files[0];
+      if (f) {
+        applyVideoFromFile(f);
+        return;
+      }
+      const uri = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
+      const trimmed = uri.trim();
+      if (trimmed) {
+        setNodes((nodes) =>
+          nodes.map((n) =>
+            n.id === id ? { ...n, data: { ...n.data, videoUrl: trimmed } } : n
+          )
+        );
+      }
+    };
+    const promptVideoUrl = () => {
+      const next = window.prompt("Video URL", data.videoUrl?.trim() ?? "");
+      if (next === null) return;
+      const trimmed = next.trim();
+      setNodes((nodes) =>
+        nodes.map((n) =>
+          n.id === id ? { ...n, data: { ...n.data, videoUrl: trimmed } } : n
+        )
+      );
+    };
+    const ytId = data.videoUrl ? youtubeVideoId(data.videoUrl) : null;
+
     return (
-      <div
-        className={[
-          "overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
-          "border-l-[3px]",
-          accent,
-          selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
-        ].join(" ")}
-        style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
-      >
-        {resizerStandard}
-        <Handle
-          type="target"
-          position={Position.Left}
-          className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
+      <>
+        <input
+          ref={videoFileRef}
+          type="file"
+          accept="video/*"
+          className="hidden"
+          aria-hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) applyVideoFromFile(f);
+            e.target.value = "";
+          }}
         />
-        <div className="border-b border-zinc-800/80 px-2 py-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-            {typeLabel}
-          </span>
-          <div className="truncate text-sm font-medium text-zinc-100">{data.title}</div>
-        </div>
-        {data.videoUrl ? (
-          <video
-            className="h-28 w-full bg-black object-cover"
-            src={data.videoUrl}
-            muted
-            playsInline
-            preload="metadata"
+        <div
+          className={[
+            "flex min-h-0 flex-col overflow-hidden rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
+            "border-l-[3px]",
+            accent,
+            selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
+          ].join(" ")}
+          style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
+        >
+          {resizerStandard}
+          <Handle
+            type="target"
+            position={Position.Left}
+            className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
           />
-        ) : (
-          <div className="flex h-28 items-center justify-center bg-zinc-950 text-xs text-zinc-600">
-            Set video URL
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
+            <div className="min-w-0 flex-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                {typeLabel}
+              </span>
+              <div className="truncate text-sm font-medium text-zinc-100">{data.title}</div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800"
+                onClick={() => videoFileRef.current?.click()}
+              >
+                Load…
+              </button>
+              <button
+                type="button"
+                className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800"
+                onClick={promptVideoUrl}
+              >
+                URL…
+              </button>
+              {data.videoUrl?.trim() ? (
+                <a
+                  href={data.videoUrl.trim()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800"
+                >
+                  Open link
+                </a>
+              ) : null}
+            </div>
           </div>
-        )}
-        <Handle
-          type="source"
-          position={Position.Right}
-          className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-        />
-      </div>
+          {data.videoUrl ? (
+            <div
+              className="flex min-h-0 w-full flex-1 items-center justify-center bg-zinc-950"
+              onDragOver={onVideoDragOver}
+              onDrop={onVideoDrop}
+            >
+              {ytId ? (
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={youtubeThumbnailUrl(ytId)}
+                    alt=""
+                    className="max-h-full max-w-full object-contain"
+                  />
+                </>
+              ) : (
+                <video
+                  className="max-h-full max-w-full object-contain"
+                  src={data.videoUrl}
+                  muted
+                  playsInline
+                  preload="metadata"
+                />
+              )}
+            </div>
+          ) : (
+            <div
+              className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 bg-zinc-950 px-2 text-center text-xs text-zinc-600"
+              onDragOver={onVideoDragOver}
+              onDrop={onVideoDrop}
+            >
+              <span>Set video URL or drop a file</span>
+            </div>
+          )}
+          <Handle
+            type="source"
+            position={Position.Right}
+            className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
+          />
+        </div>
+      </>
     );
   }
+
+  const isTextNode = data.nodeType === "text";
 
   return (
     <div
@@ -488,6 +643,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         "border-l-[3px]",
         accent,
         selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
+        isTextNode ? "flex min-h-0 flex-col overflow-hidden" : "",
       ].join(" ")}
       style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
     >
@@ -497,7 +653,12 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         position={Position.Left}
         className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
       />
-      <div className="border-b border-zinc-800/80 px-3 py-2">
+      <div
+        className={[
+          "border-b border-zinc-800/80 px-3 py-2",
+          isTextNode ? "shrink-0" : "",
+        ].join(" ")}
+      >
         <div className="flex items-center justify-between gap-2">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
             {typeLabel}
@@ -509,7 +670,13 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         </div>
         <div className="mt-1 font-medium leading-snug text-zinc-100">{data.title}</div>
       </div>
-      <div className="space-y-2 px-3 py-2">
+      <div
+        className={[
+          isTextNode
+            ? "flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 py-2"
+            : "space-y-2 px-3 py-2",
+        ].join(" ")}
+      >
         {data.nodeType === "evidence" && data.imageUrl ? (
           <div className="overflow-hidden rounded border border-zinc-800">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -536,17 +703,25 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           </a>
         ) : null}
         {data.shortDescription ? (
-          <p className="line-clamp-3 text-xs leading-relaxed text-zinc-400">{data.shortDescription}</p>
+          <p
+            className={
+              isTextNode
+                ? "min-h-0 flex-1 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-zinc-400"
+                : "line-clamp-3 text-xs leading-relaxed text-zinc-400"
+            }
+          >
+            {data.shortDescription}
+          </p>
         ) : data.nodeType !== "evidence" || (!data.imageUrl && !data.videoUrl) ? (
           <p className="text-xs italic text-zinc-600">No description</p>
         ) : null}
         {data.owner ? (
-          <p className="text-[11px] text-zinc-500">
+          <p className={`text-[11px] text-zinc-500${isTextNode ? " shrink-0" : ""}`}>
             <span className="text-zinc-600">Owner</span> {data.owner}
           </p>
         ) : null}
         {previewTags.length > 0 ? (
-          <div className="flex flex-wrap gap-1">
+          <div className={`flex flex-wrap gap-1${isTextNode ? " shrink-0" : ""}`}>
             {previewTags.map((t) => (
               <span
                 key={t}
