@@ -802,6 +802,7 @@ function GraphWorkspaceInner() {
       ) : null}
       <ReactFlow
         className={`min-h-0 flex-1 bg-[#0c0c0e] ${groupPath.length > 0 && !focusMode ? "pt-0" : ""}`}
+        minZoom={0.001}
         nodes={flowNodes}
         edges={flowEdges}
         onNodesChange={onNodesChange}

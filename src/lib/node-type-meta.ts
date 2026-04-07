@@ -21,6 +21,7 @@ export const NODE_TYPE_LABEL: Record<OpenSeerNodeType, string> = {
   document: "Document",
   frame: "Group Nodes",
   group: "Grouping",
+  hub: "Hub Node",
 };
 
 /** Left border accent (Tailwind classes) on canvas nodes */
@@ -44,6 +45,7 @@ export const NODE_TYPE_ACCENT_CLASS: Record<OpenSeerNodeType, string> = {
   document: "border-l-amber-500",
   frame: "border-l-slate-400",
   group: "border-l-teal-400",
+  hub: "border-l-violet-400",
 };
 
 /** MiniMap node fill colors */
@@ -67,6 +69,7 @@ export const NODE_TYPE_MINIMAP_COLOR: Record<OpenSeerNodeType, string> = {
   document: "#f59e0b",
   frame: "#94a3b8",
   group: "#22d3ee",
+  hub: "#a78bfa",
 };
 
 export const DEFAULT_TITLE_BY_TYPE: Record<OpenSeerNodeType, string> = {
@@ -89,6 +92,7 @@ export const DEFAULT_TITLE_BY_TYPE: Record<OpenSeerNodeType, string> = {
   document: "New document",
   frame: "New group nodes",
   group: "New grouping",
+  hub: "New hub",
 };
 
 export function minimapColorForNodeType(t: OpenSeerNodeType | undefined): string {

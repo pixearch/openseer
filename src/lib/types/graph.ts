@@ -19,6 +19,7 @@ export const OPEN_SEER_NODE_TYPES = [
   "document",
   "frame",
   "group",
+  "hub",
 ] as const;
 
 export type OpenSeerNodeType = (typeof OPEN_SEER_NODE_TYPES)[number];
@@ -31,6 +32,7 @@ export const GRAPH_WORKSPACE_NODE_TYPE_LIST: OpenSeerNodeType[] = [
   "video",
   "document",
   "group",
+  "hub",
 ];
 
 export const OPEN_SEER_STATUSES = [
@@ -108,6 +110,9 @@ export interface OpenSeerNodeData {
     nodes: import("@xyflow/react").Node<OpenSeerNodeData>[];
     edges: import("@xyflow/react").Edge<OpenSeerEdgeData>[];
   };
+
+  /** Hub node: regular polygon side count (3–16), default 6 */
+  hubSides?: number;
 
   /** Satisfies React Flow node data constraint */
   [key: string]: unknown;

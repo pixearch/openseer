@@ -26,5 +26,8 @@ export function createEmptyNodeData(nodeType: OpenSeerNodeType): OpenSeerNodeDat
   if (nodeType === "code") {
     base.codeBlocks = [{ id: crypto.randomUUID(), content: "" }];
   }
+  if (nodeType === "hub") {
+    base.hubSides = 6;
+  }
   return base;
 }
