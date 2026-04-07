@@ -73,9 +73,12 @@ function hubHandleStyle(leftPct: number, topPct: number): CSSProperties {
   };
 }
 
-/** Large transparent hit target; small visible tab is `.os-quad-handle-visual` inside. */
+/** Large transparent hit target; small visible tab is `.os-quad-handle-visual` inside. z-0 keeps handles under the node face (see OS_QUAD_NODE_FACE). */
 const QUAD_HANDLE_CLASS =
-  "os-quad-handle !z-[2] !h-6 !w-6 !min-h-6 !min-w-6 !rounded-none !border-0 !bg-transparent !shadow-none !pointer-events-auto relative box-border";
+  "os-quad-handle !z-0 !h-6 !w-6 !min-h-6 !min-w-6 !rounded-none !border-0 !bg-transparent !shadow-none !pointer-events-auto relative box-border";
+
+/** Stacks above quad handles so the card background hides the connector under the node edge. */
+const OS_QUAD_NODE_FACE = "relative z-[1] bg-inherit";
 
 function quadHandleVisualLayout(position: Position): string {
   switch (position) {
@@ -425,8 +428,8 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
       isVisible={selected}
       minWidth={GROUP_STANDARD_WIDTH}
       minHeight={GROUP_STANDARD_HEIGHT}
-      handleClassName="!h-2 !w-2 !rounded-sm !border !border-zinc-500 !bg-zinc-800"
-      lineClassName="!border-zinc-500"
+      handleClassName="!z-[2] !h-2 !w-2 !rounded-sm !border !border-zinc-500 !bg-zinc-800"
+      lineClassName="!z-[2] !border-zinc-500"
       color="#71717a"
     />
   );
@@ -436,8 +439,8 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
       isVisible={selected}
       minWidth={NODE_STANDARD_WIDTH}
       minHeight={NODE_STANDARD_HEIGHT}
-      handleClassName="!h-2 !w-2 !rounded-sm !border !border-zinc-500 !bg-zinc-800"
-      lineClassName="!border-zinc-500"
+      handleClassName="!z-[2] !h-2 !w-2 !rounded-sm !border !border-zinc-500 !bg-zinc-800"
+      lineClassName="!z-[2] !border-zinc-500"
       color="#71717a"
     />
   );
@@ -455,6 +458,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
       >
         {resizerStandard}
         <QuadrilateralHandles nodeId={id} />
+        <div className={`${OS_QUAD_NODE_FACE} flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg`}>
         <div
           className="box-border flex shrink-0 flex-col justify-center gap-0.5 overflow-hidden border-b border-slate-800/80 bg-slate-950/50 px-2 py-1 leading-tight"
           style={{ height: FRAME_HEADER_RESERVE_PX }}
@@ -467,6 +471,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           <div className="truncate text-sm font-semibold text-zinc-100">{data.title}</div>
         </div>
         <div className="min-h-0 flex-1 rounded-b-md bg-transparent" />
+        </div>
       </div>
     );
   }
@@ -486,6 +491,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
       >
         {resizerGroup}
         <QuadrilateralHandles nodeId={id} />
+        <div className={`${OS_QUAD_NODE_FACE} flex min-h-0 flex-1 flex-col rounded-lg`}>
         <div className="shrink-0 border-b border-teal-900/50 bg-teal-950/40 px-2 py-1.5">
           {showTypeHeading ? (
             <span className="text-[10px] font-semibold uppercase tracking-wider text-teal-400/90">
@@ -499,6 +505,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             <NestedGraphThumbnail nodes={nested} edges={nestedEdges} />
           </div>
           <p className="shrink-0 text-center text-[10px] text-zinc-600">Double-click to open</p>
+        </div>
         </div>
       </div>
     );
@@ -609,7 +616,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         >
           {resizerStandard}
           <QuadrilateralHandles nodeId={id} />
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md">
+          <div className={`${OS_QUAD_NODE_FACE} flex min-h-0 flex-1 flex-col overflow-hidden rounded-md`}>
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
             <div className="min-w-0 flex-1">
               {showTypeHeading ? (
@@ -778,7 +785,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         >
           {resizerStandard}
           <QuadrilateralHandles nodeId={id} />
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md">
+          <div className={`${OS_QUAD_NODE_FACE} flex min-h-0 flex-1 flex-col overflow-hidden rounded-md`}>
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
             <div className="min-w-0 flex-1">
               {showTypeHeading ? (
@@ -956,7 +963,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         >
           {resizerStandard}
           <QuadrilateralHandles nodeId={id} />
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md">
+          <div className={`${OS_QUAD_NODE_FACE} flex min-h-0 flex-1 flex-col overflow-hidden rounded-md`}>
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
             <div className="min-w-0 flex-1">
               {showTypeHeading ? (
@@ -1112,7 +1119,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
       >
         {resizerStandard}
         <QuadrilateralHandles nodeId={id} />
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md">
+        <div className={`${OS_QUAD_NODE_FACE} flex min-h-0 flex-1 flex-col overflow-hidden rounded-md`}>
         <div className="flex shrink-0 flex-col gap-1 border-b border-zinc-800/80 px-2 py-1.5">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
@@ -1207,8 +1214,8 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
       <div
         className={
           isTextNode
-            ? "flex min-h-0 flex-1 flex-col overflow-hidden rounded-md"
-            : "contents"
+            ? `${OS_QUAD_NODE_FACE} flex min-h-0 flex-1 flex-col overflow-hidden rounded-md`
+            : `${OS_QUAD_NODE_FACE} min-h-0`
         }
       >
       <div
