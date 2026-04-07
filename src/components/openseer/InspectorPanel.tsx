@@ -250,7 +250,9 @@ function InspectorNodeEditor({
                     ? "Code"
                     : draft.nodeType === "document"
                       ? "Document"
-                      : draft.nodeType}
+                      : draft.nodeType === "hub"
+                        ? "Hub"
+                        : draft.nodeType}
         </h2>
         <p className="mt-0.5 truncate text-xs text-zinc-500" title={draft.title}>
           {draft.title}

@@ -5,6 +5,7 @@ import {
   NodeResizer,
   Position,
   useReactFlow,
+  useUpdateNodeInternals,
   type Edge,
   type Node,
   type NodeProps,
@@ -12,8 +13,10 @@ import {
 import {
   memo,
   useCallback,
+  useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type DragEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
@@ -36,6 +39,38 @@ import {
 } from "@/lib/node-type-meta";
 import type { CodeBlockEntry, OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
 import { parseYoutubeVideoId, youtubeThumbnailUrl } from "@/lib/youtube";
+
+const HUB_SIDES_MIN = 3;
+const HUB_SIDES_MAX = 16;
+
+function clampHubSides(raw: unknown): number {
+  const n = typeof raw === "number" && Number.isFinite(raw) ? Math.round(raw) : 6;
+  return Math.min(HUB_SIDES_MAX, Math.max(HUB_SIDES_MIN, n));
+}
+
+function hubGeometry(sides: number, bw: number, bh: number) {
+  const cx = bw / 2;
+  const cy = bh / 2;
+  const inset = 10;
+  const R = Math.max(8, Math.min(bw, bh) / 2 - inset);
+  const verts: { x: number; y: number }[] = [];
+  for (let i = 0; i < sides; i++) {
+    const t = -Math.PI / 2 + (2 * Math.PI * i) / sides;
+    verts.push({ x: cx + R * Math.cos(t), y: cy + R * Math.sin(t) });
+  }
+  return {
+    points: verts.map((p) => `${p.x},${p.y}`).join(" "),
+    verts,
+  };
+}
+
+function hubHandleStyle(leftPct: number, topPct: number): CSSProperties {
+  return {
+    left: `${leftPct}%`,
+    top: `${topPct}%`,
+    transform: "translate(-50%, -50%)",
+  };
+}
 
 function thumbnailNodeSize(n: Node<OpenSeerNodeData>): { w: number; h: number } {
   if (typeof n.width === "number" && typeof n.height === "number") {
@@ -156,6 +191,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   const [videoLightbox, setVideoLightbox] = useState(false);
   const [imgCtxMenu, setImgCtxMenu] = useState<{ clientX: number; clientY: number } | null>(null);
   const { setNodes } = useReactFlow();
+  const updateNodeInternals = useUpdateNodeInternals();
   const fileRef = useRef<HTMLInputElement>(null);
   const videoFileRef = useRef<HTMLInputElement>(null);
   const documentFileRef = useRef<HTMLInputElement>(null);
@@ -217,6 +253,36 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
     },
     [id, setNodes]
   );
+
+  const hubRootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (data.nodeType !== "hub") return;
+    updateNodeInternals(id);
+  }, [data.hubSides, data.nodeType, id, updateNodeInternals, w, h]);
+
+  useEffect(() => {
+    if (data.nodeType !== "hub") return;
+    const el = hubRootRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey || !selected) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const dir = e.deltaY < 0 ? 1 : -1;
+      setNodes((nodes) =>
+        nodes.map((n) => {
+          if (n.id !== id || n.data.nodeType !== "hub") return n;
+          const cur = clampHubSides(n.data.hubSides);
+          const next = Math.min(HUB_SIDES_MAX, Math.max(HUB_SIDES_MIN, cur + dir));
+          if (next === cur) return n;
+          return { ...n, data: { ...n.data, hubSides: next } };
+        })
+      );
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [data.nodeType, id, selected, setNodes]);
 
   const maybeAutofillYoutubeMeta = useCallback(
     (videoUrl: string) => {
@@ -345,6 +411,67 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           position={Position.Right}
           className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
         />
+      </div>
+    );
+  }
+
+  if (data.nodeType === "hub") {
+    const bw = w ?? NODE_STANDARD_WIDTH;
+    const bh = h ?? NODE_STANDARD_HEIGHT;
+    const sides = clampHubSides(data.hubSides);
+    const { points, verts } = hubGeometry(sides, bw, bh);
+
+    return (
+      <div
+        ref={hubRootRef}
+        className={[
+          "relative",
+          selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
+        ].join(" ")}
+        style={{ width: bw, height: bh }}
+      >
+        {resizerStandard}
+        <svg
+          width={bw}
+          height={bh}
+          className="pointer-events-none absolute inset-0 z-0 block"
+          aria-hidden
+        >
+          <polygon
+            points={points}
+            fill="rgb(24 24 27 / 0.95)"
+            stroke="rgb(139 92 246 / 0.5)"
+            strokeWidth={1.5}
+            strokeLinejoin="round"
+          />
+        </svg>
+        <div className="pointer-events-none absolute inset-0 z-[1] flex flex-col items-center justify-center px-8 text-center">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-violet-400/90">
+            {typeLabel}
+          </span>
+          <div className="mt-1 line-clamp-2 text-sm font-semibold text-zinc-100">{data.title}</div>
+        </div>
+        {verts.map((v, i) => {
+          const st = hubHandleStyle((v.x / bw) * 100, (v.y / bh) * 100);
+          return (
+            <span key={i} className="contents">
+              <Handle
+                type="target"
+                id={`hub-${i}-t`}
+                position={Position.Top}
+                className="!z-[2] !h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
+                style={st}
+              />
+              <Handle
+                type="source"
+                id={`hub-${i}-s`}
+                position={Position.Top}
+                className="!z-[2] !h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
+                style={st}
+              />
+            </span>
+          );
+        })}
       </div>
     );
   }
