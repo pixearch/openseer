@@ -15,9 +15,11 @@ import {
   ReactFlow,
   ReactFlowProvider,
   SelectionMode,
+  getSmoothStepPath,
   useReactFlow,
   useStoreApi,
 } from "@xyflow/react";
+import { getEdgePosition } from "@xyflow/system";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type {
@@ -94,6 +96,30 @@ const WORKSPACE_TYPE_SET = new Set<OpenSeerNodeType>(GRAPH_WORKSPACE_NODE_TYPE_L
 
 const SESSION_GRAPH_PANEL_COLLAPSED_KEY = "openseer-graph-panel-collapsed";
 const LOCAL_SHOW_NODE_TYPE_HEADINGS_KEY = "openseer-show-node-type-headings-v1";
+
+/** Max distance (flow coordinates) from pointer to edge path to allow insert-on-drop. */
+const EDGE_INSERT_HIT_FLOW = 36;
+
+function distancePointToSvgPath(flowX: number, flowY: number, pathD: string): number {
+  if (typeof document === "undefined") return Number.POSITIVE_INFINITY;
+  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  p.setAttribute("d", pathD);
+  try {
+    const len = p.getTotalLength();
+    if (!Number.isFinite(len) || len <= 0) return Number.POSITIVE_INFINITY;
+    const steps = Math.min(64, Math.max(12, Math.ceil(len / 6)));
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0; i <= steps; i++) {
+      const pt = p.getPointAtLength((len * i) / steps);
+      const dx = pt.x - flowX;
+      const dy = pt.y - flowY;
+      best = Math.min(best, Math.hypot(dx, dy));
+    }
+    return best;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
 
 function clampRadialMenuCenter(clientX: number, clientY: number): { left: number; top: number } {
   const m = 16;
@@ -191,6 +217,11 @@ function GraphWorkspaceInner() {
     null
   );
   const proportionalDragLeaderRef = useRef<string | null>(null);
+
+  const edgeInsertEligibleRef = useRef(false);
+  const edgeInsertGrabNodeIdRef = useRef<string | null>(null);
+  const edgeInsertHoverIdRef = useRef<string | null>(null);
+  const [edgeInsertHoverId, setEdgeInsertHoverId] = useState<string | null>(null);
 
   const alignOverlayContainerRef = useRef<HTMLDivElement>(null);
 
@@ -431,6 +462,53 @@ function GraphWorkspaceInner() {
       }
 
       if (!graphPointerInside.current) return;
+
+      if (k === "b") {
+        if (e.repeat) return;
+        const selId = selectionRef.current.nodeId;
+        if (!selId) return;
+        const d0 = docRef.current;
+        const path0 = groupPathRef.current;
+        const v0 = getViewGraph(d0.nodes, d0.edges, path0);
+        const inc0 = v0.edges.filter((x) => x.target === selId);
+        const out0 = v0.edges.filter((x) => x.source === selId);
+        if (inc0.length !== 1 || out0.length !== 1) return;
+        const A0 = inc0[0].source;
+        const C0 = out0[0].target;
+        if (v0.edges.some((ed) => ed.source === A0 && ed.target === C0)) return;
+        e.preventDefault();
+        setDoc((d) => {
+          const path = groupPathRef.current;
+          const v = getViewGraph(d.nodes, d.edges, path);
+          const incoming = v.edges.filter((x) => x.target === selId);
+          const outgoing = v.edges.filter((x) => x.source === selId);
+          if (incoming.length !== 1 || outgoing.length !== 1) return d;
+          const eIn = incoming[0];
+          const eOut = outgoing[0];
+          const A = eIn.source;
+          const C = eOut.target;
+          if (v.edges.some((ed) => ed.source === A && ed.target === C)) return d;
+          const ne = v.edges.filter((ed) => ed.id !== eIn.id && ed.id !== eOut.id);
+          const outTemplate = { ...eOut } as Record<string, unknown>;
+          delete outTemplate.id;
+          delete outTemplate.source;
+          delete outTemplate.target;
+          delete outTemplate.sourceHandle;
+          delete outTemplate.targetHandle;
+          ne.push({
+            ...(outTemplate as Omit<Edge<OpenSeerEdgeData>, "id" | "source" | "target">),
+            id: `e-${A}-${C}-${crypto.randomUUID().slice(0, 8)}`,
+            source: A,
+            target: C,
+          });
+          if (path.length === 0) return { nodes: d.nodes, edges: ne };
+          return {
+            nodes: patchNestedGraph(d.nodes, path, v.nodes, ne),
+            edges: d.edges,
+          };
+        });
+        return;
+      }
 
       if (k === "a") {
         const ids = selectionRef.current.multiNodeIds;
@@ -746,7 +824,7 @@ function GraphWorkspaceInner() {
 
   const flowEdges = useMemo(() => {
     const byId = new Map(view.nodes.map((n) => [n.id, n]));
-    return view.edges.filter((e) => {
+    const list = view.edges.filter((e) => {
       const s = byId.get(e.source);
       const t = byId.get(e.target);
       return (
@@ -756,7 +834,92 @@ function GraphWorkspaceInner() {
         isVisibleOnCanvas(t, visibleTypes)
       );
     });
-  }, [view.edges, view.nodes, visibleTypes]);
+    if (!edgeInsertHoverId) return list;
+    return list.map((e) =>
+      e.id === edgeInsertHoverId
+        ? {
+            ...e,
+            style: {
+              ...e.style,
+              stroke: "#38bdf8",
+              strokeWidth: (typeof e.style?.strokeWidth === "number" ? e.style.strokeWidth : 1.5) + 2,
+            },
+            zIndex: 1000,
+          }
+        : e
+    );
+  }, [view.edges, view.nodes, visibleTypes, edgeInsertHoverId]);
+
+  const updateEdgeInsertHover = useCallback(
+    (e: { clientX: number; clientY: number }, draggedNodeId: string) => {
+      if (
+        !edgeInsertEligibleRef.current ||
+        edgeInsertGrabNodeIdRef.current !== draggedNodeId
+      ) {
+        if (edgeInsertHoverIdRef.current !== null) {
+          edgeInsertHoverIdRef.current = null;
+          setEdgeInsertHoverId(null);
+        }
+        return;
+      }
+
+      const flowPos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const { nodeLookup, connectionMode, transform } = store.getState();
+      const zoom = transform[2] || 1;
+      const threshold = EDGE_INSERT_HIT_FLOW / Math.max(zoom, 0.001);
+
+      let bestId: string | null = null;
+      let bestD = threshold;
+
+      for (const edge of flowEdges) {
+        if (edge.source === draggedNodeId || edge.target === draggedNodeId) continue;
+
+        const t = edge.type ?? "smoothstep";
+        if (t !== "smoothstep" && t !== "step") continue;
+
+        const sourceNode = nodeLookup.get(edge.source);
+        const targetNode = nodeLookup.get(edge.target);
+        if (!sourceNode || !targetNode) continue;
+
+        const pos = getEdgePosition({
+          id: edge.id,
+          sourceNode,
+          sourceHandle: edge.sourceHandle ?? null,
+          targetNode,
+          targetHandle: edge.targetHandle ?? null,
+          connectionMode,
+        });
+        if (!pos) continue;
+
+        const pathOpts = (edge as { pathOptions?: { offset?: number; stepPosition?: number } })
+          .pathOptions;
+        const [pathD] = getSmoothStepPath({
+          ...pos,
+          borderRadius: t === "step" ? 0 : undefined,
+          offset: pathOpts?.offset,
+          stepPosition: pathOpts?.stepPosition,
+        });
+        const dist = distancePointToSvgPath(flowPos.x, flowPos.y, pathD);
+        if (dist < bestD) {
+          bestD = dist;
+          bestId = edge.id;
+        }
+      }
+
+      if (edgeInsertHoverIdRef.current !== bestId) {
+        edgeInsertHoverIdRef.current = bestId;
+        setEdgeInsertHoverId(bestId);
+      }
+    },
+    [flowEdges, screenToFlowPosition, store]
+  );
+
+  const handleNodeDrag: OnNodeDrag<Node<OpenSeerNodeData>> = useCallback(
+    (e, node) => {
+      updateEdgeInsertHover(e, node.id);
+    },
+    [updateEdgeInsertHover]
+  );
 
   const selectedNode = useMemo(
     () => view.nodes.find((n) => n.id === selection.nodeId) ?? null,
@@ -1004,16 +1167,78 @@ function GraphWorkspaceInner() {
 
   const onNodeDragStart: OnNodeDrag<Node<OpenSeerNodeData>> = useCallback((_e, node) => {
     const pm = proportionalLayoutRef.current;
-    if (!pm?.orderedIds.includes(node.id)) return;
-    proportionalDragLeaderRef.current = node.id;
+    if (pm?.orderedIds.includes(node.id)) {
+      proportionalDragLeaderRef.current = node.id;
+    }
+
+    const multi = selectionRef.current.multiNodeIds;
+    const propBlocks =
+      pm !== null && pm !== undefined && pm.orderedIds.length > 1;
+    edgeInsertEligibleRef.current = multi === null && !propBlocks;
+    edgeInsertGrabNodeIdRef.current = node.id;
   }, []);
 
-  const onNodeDragStop: OnNodeDrag<Node<OpenSeerNodeData>> = useCallback(() => {
+  const onNodeDragStop: OnNodeDrag<Node<OpenSeerNodeData>> = useCallback((_e, node) => {
     proportionalDragLeaderRef.current = null;
+
+    const hoverId = edgeInsertHoverIdRef.current;
+    edgeInsertHoverIdRef.current = null;
+    setEdgeInsertHoverId(null);
+
+    const eligible = edgeInsertEligibleRef.current;
+    const grabOk = edgeInsertGrabNodeIdRef.current === node.id;
+    edgeInsertEligibleRef.current = false;
+    edgeInsertGrabNodeIdRef.current = null;
+
+    if (!eligible || !grabOk || !hoverId) return;
+
+    const B = node.id;
+    setDoc((d) => {
+      const path = groupPathRef.current;
+      const v = getViewGraph(d.nodes, d.edges, path);
+      const edge = v.edges.find((ed) => ed.id === hoverId);
+      if (!edge) return d;
+      const A = edge.source;
+      const C = edge.target;
+      if (A === B || C === B) return d;
+      if (v.edges.some((ed) => ed.source === A && ed.target === B)) return d;
+      if (v.edges.some((ed) => ed.source === B && ed.target === C)) return d;
+
+      const ne = v.edges.filter((ed) => ed.id !== hoverId);
+      const edgeTemplate = { ...edge } as Record<string, unknown>;
+      delete edgeTemplate.id;
+      delete edgeTemplate.source;
+      delete edgeTemplate.target;
+      delete edgeTemplate.sourceHandle;
+      delete edgeTemplate.targetHandle;
+      const edgeRest = edgeTemplate as Omit<Edge<OpenSeerEdgeData>, "id" | "source" | "target">;
+      ne.push(
+        {
+          ...edgeRest,
+          id: `e-${A}-${B}-${crypto.randomUUID().slice(0, 8)}`,
+          source: A,
+          target: B,
+        },
+        {
+          ...edgeRest,
+          id: `e-${B}-${C}-${crypto.randomUUID().slice(0, 8)}`,
+          source: B,
+          target: C,
+        }
+      );
+      if (path.length === 0) return { nodes: d.nodes, edges: ne };
+      return {
+        nodes: patchNestedGraph(d.nodes, path, v.nodes, ne),
+        edges: d.edges,
+      };
+    });
   }, []);
 
   const onSelectionDragStart: SelectionDragHandler<Node<OpenSeerNodeData>> = useCallback(
     (_e, nodes) => {
+      if (nodes.length > 1) {
+        edgeInsertEligibleRef.current = false;
+      }
       const pm = proportionalLayoutRef.current;
       if (!pm) return;
       const set = new Set(pm.orderedIds);
@@ -1025,6 +1250,10 @@ function GraphWorkspaceInner() {
 
   const onSelectionDragStop: SelectionDragHandler<Node<OpenSeerNodeData>> = useCallback(() => {
     proportionalDragLeaderRef.current = null;
+    edgeInsertHoverIdRef.current = null;
+    setEdgeInsertHoverId(null);
+    edgeInsertEligibleRef.current = false;
+    edgeInsertGrabNodeIdRef.current = null;
   }, []);
 
   const onNodeDoubleClick: NodeMouseHandler = useCallback((_e, node) => {
@@ -1196,6 +1425,7 @@ function GraphWorkspaceInner() {
           onSelectionDragStart={onSelectionDragStart}
           onSelectionDragStop={onSelectionDragStop}
           onNodeContextMenu={onNodeContextMenu}
+          onNodeDrag={handleNodeDrag}
           onNodeDragStart={onNodeDragStart}
           onNodeDragStop={onNodeDragStop}
           onNodeDoubleClick={onNodeDoubleClick}
