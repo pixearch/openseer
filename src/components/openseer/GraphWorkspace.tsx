@@ -20,7 +20,16 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import type { Connection, Edge, EdgeChange, Node, NodeChange, NodeMouseHandler } from "@xyflow/react";
+import type {
+  Connection,
+  Edge,
+  EdgeChange,
+  Node,
+  NodeChange,
+  NodeMouseHandler,
+  OnNodeDrag,
+  SelectionDragHandler,
+} from "@xyflow/react";
 import { GraphSidebar } from "@/components/openseer/GraphSidebar";
 import { ShowNodeTypeHeadingContext } from "@/components/openseer/graph-workspace-ui-context";
 import { InspectorPanel } from "@/components/openseer/InspectorPanel";
@@ -37,6 +46,13 @@ import {
   NODE_STANDARD_HEIGHT,
   NODE_STANDARD_WIDTH,
 } from "@/lib/default-node";
+import {
+  applyMultiNodeAlign,
+  applyMultiNodeDistribute,
+  buildProportionalLayoutState,
+  computeProportionalPositions,
+  type AlignDirection,
+} from "@/lib/graph/multi-node-layout";
 import {
   clampFrameChildrenEverywhere,
   clampFrameChildrenPositions,
@@ -148,11 +164,82 @@ function GraphWorkspaceInner() {
   const [graphPanelCollapsed, setGraphPanelCollapsed] = useState(false);
   const [showNodeTypeHeadings, setShowNodeTypeHeadings] = useState(true);
   const [gridSnapEnabled, setGridSnapEnabled] = useState(false);
+  const [alignOverlay, setAlignOverlay] = useState<null | "align" | "distribute">(null);
+  const [proportionalMoveUi, setProportionalMoveUi] = useState(false);
 
   const selectionRef = useRef(selection);
   useLayoutEffect(() => {
     selectionRef.current = selection;
   }, [selection]);
+
+  const docRef = useRef(doc);
+  useLayoutEffect(() => {
+    docRef.current = doc;
+  }, [doc]);
+
+  const groupPathRef = useRef(groupPath);
+  useLayoutEffect(() => {
+    groupPathRef.current = groupPath;
+  }, [groupPath]);
+
+  const alignOverlayRef = useRef<null | "align" | "distribute">(null);
+  useLayoutEffect(() => {
+    alignOverlayRef.current = alignOverlay;
+  }, [alignOverlay]);
+
+  const proportionalLayoutRef = useRef<ReturnType<typeof buildProportionalLayoutState> | null>(
+    null
+  );
+  const proportionalDragLeaderRef = useRef<string | null>(null);
+
+  const alignOverlayContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!alignOverlay) return;
+    alignOverlayContainerRef.current?.focus();
+  }, [alignOverlay]);
+
+  const applyAlignOverlayChoice = useCallback((dir: AlignDirection, mode: "align" | "distribute") => {
+    setAlignOverlay(null);
+    setDoc((d) => {
+      const ids = selectionRef.current.multiNodeIds;
+      if (!ids || ids.length < 2) return d;
+      const path = groupPathRef.current;
+      const v = getViewGraph(d.nodes, d.edges, path);
+      const raw =
+        mode === "distribute"
+          ? applyMultiNodeDistribute(v.nodes, ids, dir)
+          : applyMultiNodeAlign(v.nodes, ids, dir);
+      const clamped = clampFrameChildrenPositions(raw);
+      const ordered = sortParentsBeforeChildren(clamped);
+      if (path.length === 0) return { nodes: ordered, edges: d.edges };
+      return {
+        nodes: patchNestedGraph(d.nodes, path, ordered, v.edges),
+        edges: d.edges,
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!alignOverlay) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setAlignOverlay(null);
+        return;
+      }
+      let dir: AlignDirection | null = null;
+      if (e.code === "ArrowUp") dir = "up";
+      else if (e.code === "ArrowDown") dir = "down";
+      else if (e.code === "ArrowLeft") dir = "left";
+      else if (e.code === "ArrowRight") dir = "right";
+      if (!dir) return;
+      e.preventDefault();
+      applyAlignOverlayChoice(dir, alignOverlay);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [alignOverlay, applyAlignOverlayChoice]);
 
   const groupPathKey = groupPath.join("|");
 
@@ -317,6 +404,17 @@ function GraphWorkspaceInner() {
         return;
       }
       if (ctxMenu) return;
+      if (alignOverlayRef.current) return;
+
+      if (e.key === "Escape") {
+        if (proportionalLayoutRef.current) {
+          e.preventDefault();
+          proportionalLayoutRef.current = null;
+          proportionalDragLeaderRef.current = null;
+          setProportionalMoveUi(false);
+        }
+        return;
+      }
 
       const k = e.key.length === 1 ? e.key.toLowerCase() : "";
 
@@ -333,6 +431,37 @@ function GraphWorkspaceInner() {
       }
 
       if (!graphPointerInside.current) return;
+
+      if (k === "a") {
+        const ids = selectionRef.current.multiNodeIds;
+        if (!ids || ids.length < 2) return;
+        e.preventDefault();
+        setAlignOverlay(e.shiftKey ? "distribute" : "align");
+        return;
+      }
+
+      if (k === "m") {
+        if (e.repeat) return;
+        e.preventDefault();
+        if (proportionalLayoutRef.current) {
+          proportionalLayoutRef.current = null;
+          proportionalDragLeaderRef.current = null;
+          setProportionalMoveUi(false);
+          return;
+        }
+        const ids = selectionRef.current.multiNodeIds;
+        if (!ids || ids.length < 2) return;
+        const v = getViewGraph(
+          docRef.current.nodes,
+          docRef.current.edges,
+          groupPathRef.current
+        );
+        const layout = buildProportionalLayoutState(v.nodes, ids);
+        if (!layout) return;
+        proportionalLayoutRef.current = layout;
+        setProportionalMoveUi(true);
+        return;
+      }
 
       if (k === "s") {
         if (e.repeat) return;
@@ -391,6 +520,7 @@ function GraphWorkspaceInner() {
         return;
       }
       if (ctxMenu) return;
+      if (alignOverlayRef.current) return;
       if (!graphPointerInside.current) return;
 
       const code = e.code;
@@ -426,23 +556,68 @@ function GraphWorkspaceInner() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ctxMenu, store]);
+  }, [ctxMenu, store, alignOverlay]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<Node<OpenSeerNodeData>>[]) => {
       setDoc((d) => {
-        const v = getViewGraph(d.nodes, d.edges, groupPath);
-        const nn = applyNodeChanges(changes, v.nodes);
+        const path = groupPathRef.current;
+        const v = getViewGraph(d.nodes, d.edges, path);
+        let effectiveChanges = changes;
+
+        const pm = proportionalLayoutRef.current;
+        if (pm) {
+          const selSet = new Set(pm.orderedIds);
+          const posChanges = changes.filter(
+            (c): c is NodeChange<Node<OpenSeerNodeData>> & { type: "position"; id: string } =>
+              c.type === "position" && selSet.has(c.id)
+          );
+          if (posChanges.length > 0) {
+            const leaderId =
+              proportionalDragLeaderRef.current &&
+              selSet.has(proportionalDragLeaderRef.current)
+                ? proportionalDragLeaderRef.current
+                : posChanges[0].id;
+            const leaderChange =
+              posChanges.find((c) => c.id === leaderId) ?? posChanges[0];
+            const pos =
+              leaderChange && "position" in leaderChange && leaderChange.position
+                ? leaderChange.position
+                : null;
+            if (pos) {
+              const relMap = computeProportionalPositions(v.nodes, pm, leaderId, pos);
+              const dragFlag =
+                "dragging" in leaderChange ? leaderChange.dragging : undefined;
+              const filtered = changes.filter(
+                (c) => !(c.type === "position" && selSet.has(c.id))
+              );
+              for (const id of pm.orderedIds) {
+                const p = relMap.get(id);
+                if (p) {
+                  filtered.push({
+                    type: "position",
+                    id,
+                    position: p,
+                    dragging: dragFlag,
+                  });
+                }
+              }
+              effectiveChanges = filtered;
+            }
+          }
+        }
+
+        const nn = applyNodeChanges(effectiveChanges, v.nodes);
         const clamped = clampFrameChildrenPositions(nn);
         const ordered = sortParentsBeforeChildren(clamped);
-        if (groupPath.length === 0) return { nodes: ordered, edges: d.edges };
+        if (path.length === 0) return { nodes: ordered, edges: d.edges };
         return {
-          nodes: patchNestedGraph(d.nodes, groupPath, ordered, v.edges),
+          nodes: patchNestedGraph(d.nodes, path, ordered, v.edges),
           edges: d.edges,
         };
       });
     },
-    [groupPath]
+    []
   );
 
   const onEdgesChange = useCallback(
@@ -484,19 +659,41 @@ function GraphWorkspaceInner() {
 
   const onSelectionChange = useCallback(
     ({ nodes: sn, edges: se }: { nodes: Node[]; edges: Edge[] }) => {
+      let next: {
+        nodeId: string | null;
+        edgeId: string | null;
+        multiNodeIds: string[] | null;
+      };
       if (sn.length > 1) {
-        setSelection({
+        next = {
           nodeId: null,
           edgeId: null,
           multiNodeIds: sn.map((n) => n.id),
-        });
+        };
       } else if (sn.length === 1) {
-        setSelection({ nodeId: sn[0].id, edgeId: null, multiNodeIds: null });
+        next = { nodeId: sn[0].id, edgeId: null, multiNodeIds: null };
       } else if (se.length === 1) {
-        setSelection({ nodeId: null, edgeId: se[0].id, multiNodeIds: null });
+        next = { nodeId: null, edgeId: se[0].id, multiNodeIds: null };
       } else {
-        setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
+        next = { nodeId: null, edgeId: null, multiNodeIds: null };
       }
+
+      const pm = proportionalLayoutRef.current;
+      if (pm) {
+        const ids = next.multiNodeIds;
+        const set = new Set(ids ?? []);
+        if (
+          !ids ||
+          ids.length !== pm.orderedIds.length ||
+          !pm.orderedIds.every((id) => set.has(id))
+        ) {
+          proportionalLayoutRef.current = null;
+          proportionalDragLeaderRef.current = null;
+          setProportionalMoveUi(false);
+        }
+      }
+
+      setSelection(next);
     },
     []
   );
@@ -680,8 +877,15 @@ function GraphWorkspaceInner() {
   const onAddNodeAt = useCallback(
     (nodeType: OpenSeerNodeType, position: { x: number; y: number }) => {
       const id = `n-${crypto.randomUUID()}`;
+      const sel = selectionRef.current;
+      const selectedIds: string[] =
+        sel.multiNodeIds?.length ? sel.multiNodeIds : sel.nodeId ? [sel.nodeId] : [];
+
       setDoc((d) => {
         const v = getViewGraph(d.nodes, d.edges, groupPath);
+        const inView = new Set(v.nodes.map((n) => n.id));
+        const sources = selectedIds.filter((sid) => inView.has(sid));
+
         const isGroup = nodeType === "group";
         const nextNodes = [
           ...v.nodes,
@@ -697,9 +901,25 @@ function GraphWorkspaceInner() {
             height: isGroup ? GROUP_STANDARD_HEIGHT : NODE_STANDARD_HEIGHT,
           },
         ];
-        if (groupPath.length === 0) return { nodes: nextNodes, edges: d.edges };
+
+        let nextEdges = v.edges;
+        for (const src of sources) {
+          if (src === id) continue;
+          if (nextEdges.some((e) => e.source === src && e.target === id)) continue;
+          const eid = `e-${src}-${id}-${crypto.randomUUID().slice(0, 8)}`;
+          const edge: Edge<OpenSeerEdgeData> = {
+            id: eid,
+            source: src,
+            target: id,
+            label: "relates_to",
+            data: { label: "relates_to", relationshipType: "relates_to" },
+          };
+          nextEdges = addEdge(edge, nextEdges);
+        }
+
+        if (groupPath.length === 0) return { nodes: nextNodes, edges: nextEdges };
         return {
-          nodes: patchNestedGraph(d.nodes, groupPath, nextNodes, v.edges),
+          nodes: patchNestedGraph(d.nodes, groupPath, nextNodes, nextEdges),
           edges: d.edges,
         };
       });
@@ -781,6 +1001,31 @@ function GraphWorkspaceInner() {
     },
     []
   );
+
+  const onNodeDragStart: OnNodeDrag<Node<OpenSeerNodeData>> = useCallback((_e, node) => {
+    const pm = proportionalLayoutRef.current;
+    if (!pm?.orderedIds.includes(node.id)) return;
+    proportionalDragLeaderRef.current = node.id;
+  }, []);
+
+  const onNodeDragStop: OnNodeDrag<Node<OpenSeerNodeData>> = useCallback(() => {
+    proportionalDragLeaderRef.current = null;
+  }, []);
+
+  const onSelectionDragStart: SelectionDragHandler<Node<OpenSeerNodeData>> = useCallback(
+    (_e, nodes) => {
+      const pm = proportionalLayoutRef.current;
+      if (!pm) return;
+      const set = new Set(pm.orderedIds);
+      const first = nodes.find((n) => set.has(n.id));
+      if (first) proportionalDragLeaderRef.current = first.id;
+    },
+    []
+  );
+
+  const onSelectionDragStop: SelectionDragHandler<Node<OpenSeerNodeData>> = useCallback(() => {
+    proportionalDragLeaderRef.current = null;
+  }, []);
 
   const onNodeDoubleClick: NodeMouseHandler = useCallback((_e, node) => {
     if (node.data.nodeType === "group") {
@@ -948,7 +1193,11 @@ function GraphWorkspaceInner() {
           onConnect={onConnect}
           onSelectionChange={onSelectionChange}
           onSelectionContextMenu={onSelectionContextMenu}
+          onSelectionDragStart={onSelectionDragStart}
+          onSelectionDragStop={onSelectionDragStop}
           onNodeContextMenu={onNodeContextMenu}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDragStop={onNodeDragStop}
           onNodeDoubleClick={onNodeDoubleClick}
           nodeTypes={nodeTypes}
           defaultEdgeOptions={defaultEdgeOptions}
@@ -992,6 +1241,80 @@ function GraphWorkspaceInner() {
           ) : null}
         </ReactFlow>
       </ShowNodeTypeHeadingContext.Provider>
+      {proportionalMoveUi ? (
+        <div className="pointer-events-none absolute bottom-20 left-1/2 z-[24] -translate-x-1/2 rounded-md border border-amber-600/80 bg-amber-950/95 px-3 py-1.5 text-center text-xs font-medium text-amber-100 shadow-lg">
+          Proportional move — M or Esc to exit
+        </div>
+      ) : null}
+      {alignOverlay ? (
+        <div
+          ref={alignOverlayContainerRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Choose alignment direction"
+          tabIndex={-1}
+          className="absolute inset-0 z-[25] flex flex-col items-center justify-center bg-black/55 outline-none"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            aria-label="Cancel alignment"
+            className="absolute inset-0 cursor-default bg-transparent"
+            onClick={() => setAlignOverlay(null)}
+          />
+          <div className="relative z-[1] flex max-w-md flex-col items-center gap-5 rounded-xl border border-zinc-600 bg-zinc-900 px-10 py-9 shadow-2xl">
+            <p className="text-center text-2xl font-semibold tracking-tight text-zinc-100">
+              {alignOverlay === "distribute" ? "Distribute" : "Align"}
+            </p>
+            <p className="select-none text-xl text-zinc-400">↑ ↓ ← →</p>
+            <div className="grid grid-cols-[2.5rem_2.5rem_2.5rem] grid-rows-[2.5rem_2.5rem_2.5rem] gap-1.5 place-items-center">
+              <span className="col-start-2 row-start-1">
+                <button
+                  type="button"
+                  className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-600 bg-zinc-800 text-lg text-zinc-100 hover:bg-zinc-700"
+                  aria-label="Up"
+                  onClick={() => applyAlignOverlayChoice("up", alignOverlay)}
+                >
+                  ↑
+                </button>
+              </span>
+              <span className="col-start-1 row-start-2">
+                <button
+                  type="button"
+                  className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-600 bg-zinc-800 text-lg text-zinc-100 hover:bg-zinc-700"
+                  aria-label="Left"
+                  onClick={() => applyAlignOverlayChoice("left", alignOverlay)}
+                >
+                  ←
+                </button>
+              </span>
+              <span className="col-start-3 row-start-2">
+                <button
+                  type="button"
+                  className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-600 bg-zinc-800 text-lg text-zinc-100 hover:bg-zinc-700"
+                  aria-label="Right"
+                  onClick={() => applyAlignOverlayChoice("right", alignOverlay)}
+                >
+                  →
+                </button>
+              </span>
+              <span className="col-start-2 row-start-3">
+                <button
+                  type="button"
+                  className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-600 bg-zinc-800 text-lg text-zinc-100 hover:bg-zinc-700"
+                  aria-label="Down"
+                  onClick={() => applyAlignOverlayChoice("down", alignOverlay)}
+                >
+                  ↓
+                </button>
+              </span>
+            </div>
+            <p className="text-center text-[11px] text-zinc-500">
+              Arrow keys · Esc to cancel
+            </p>
+          </div>
+        </div>
+      ) : null}
       {ctxMenu ? (
         <>
           <button
