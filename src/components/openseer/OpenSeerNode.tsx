@@ -73,27 +73,33 @@ function hubHandleStyle(leftPct: number, topPct: number): CSSProperties {
   };
 }
 
-/** RF anchors handle center on the node edge; h-5 w-5 (20px) needs ≥10px outset so no handle area sits inside the node. */
-const QUAD_HANDLE_OUTSET_PX = 12;
+/** Large transparent hit target; small visible tab is `.os-quad-handle-visual` inside. */
+const QUAD_HANDLE_CLASS =
+  "os-quad-handle !z-[2] !h-6 !w-6 !min-h-6 !min-w-6 !rounded-none !border-0 !bg-transparent !shadow-none !pointer-events-auto relative box-border";
 
-function quadHandleOutsetStyle(position: Position): CSSProperties {
-  const o = QUAD_HANDLE_OUTSET_PX;
+function quadHandleVisualLayout(position: Position): string {
   switch (position) {
-    case Position.Top:
-      return { transform: `translate(-50%, calc(-50% - ${o}px))` };
-    case Position.Bottom:
-      return { transform: `translate(-50%, calc(50% + ${o}px))` };
-    case Position.Left:
-      return { transform: `translate(calc(-50% - ${o}px), -50%)` };
     case Position.Right:
-      return { transform: `translate(calc(50% + ${o}px), -50%)` };
+      return "left-[9px] top-1/2 h-3 w-2.5 -translate-y-1/2";
+    case Position.Left:
+      return "right-[9px] top-1/2 h-3 w-2.5 -translate-y-1/2";
+    case Position.Top:
+      return "bottom-[9px] left-1/2 h-2.5 w-3 -translate-x-1/2";
+    case Position.Bottom:
+      return "top-[9px] left-1/2 h-2.5 w-3 -translate-x-1/2";
     default:
-      return {};
+      return "";
   }
 }
 
-const QUAD_HANDLE_CLASS =
-  "os-quad-handle !z-[2] !h-5 !w-5 !rounded-sm !border !border-zinc-500 !bg-zinc-800 !pointer-events-auto";
+function QuadHandleFace({ position }: { position: Position }) {
+  return (
+    <span
+      className={`os-quad-handle-visual pointer-events-none absolute rounded-sm border border-zinc-500 bg-zinc-800 ${quadHandleVisualLayout(position)}`}
+      aria-hidden
+    />
+  );
+}
 
 /** Targets first (left before others) and sources with right first so legacy edges without handle ids keep left/right attachment. */
 function QuadrilateralHandles({ nodeId }: { nodeId: string }) {
@@ -105,57 +111,65 @@ function QuadrilateralHandles({ nodeId }: { nodeId: string }) {
         id={`${p}__lt`}
         position={Position.Left}
         className={QUAD_HANDLE_CLASS}
-        style={quadHandleOutsetStyle(Position.Left)}
-      />
+      >
+        <QuadHandleFace position={Position.Left} />
+      </Handle>
       <Handle
         type="target"
         id={`${p}__tt`}
         position={Position.Top}
         className={QUAD_HANDLE_CLASS}
-        style={quadHandleOutsetStyle(Position.Top)}
-      />
+      >
+        <QuadHandleFace position={Position.Top} />
+      </Handle>
       <Handle
         type="target"
         id={`${p}__rt`}
         position={Position.Right}
         className={QUAD_HANDLE_CLASS}
-        style={quadHandleOutsetStyle(Position.Right)}
-      />
+      >
+        <QuadHandleFace position={Position.Right} />
+      </Handle>
       <Handle
         type="target"
         id={`${p}__bt`}
         position={Position.Bottom}
         className={QUAD_HANDLE_CLASS}
-        style={quadHandleOutsetStyle(Position.Bottom)}
-      />
+      >
+        <QuadHandleFace position={Position.Bottom} />
+      </Handle>
       <Handle
         type="source"
         id={`${p}__rs`}
         position={Position.Right}
         className={QUAD_HANDLE_CLASS}
-        style={quadHandleOutsetStyle(Position.Right)}
-      />
+      >
+        <QuadHandleFace position={Position.Right} />
+      </Handle>
       <Handle
         type="source"
         id={`${p}__ts`}
         position={Position.Top}
         className={QUAD_HANDLE_CLASS}
-        style={quadHandleOutsetStyle(Position.Top)}
-      />
+      >
+        <QuadHandleFace position={Position.Top} />
+      </Handle>
       <Handle
         type="source"
         id={`${p}__ls`}
         position={Position.Left}
         className={QUAD_HANDLE_CLASS}
-        style={quadHandleOutsetStyle(Position.Left)}
-      />
+      >
+        <QuadHandleFace position={Position.Left} />
+      </Handle>
       <Handle
         type="source"
         id={`${p}__bs`}
         position={Position.Bottom}
         className={QUAD_HANDLE_CLASS}
-        style={quadHandleOutsetStyle(Position.Bottom)}
-      />
+      >
+        <QuadHandleFace position={Position.Bottom} />
+      </Handle>
     </>
   );
 }

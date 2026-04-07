@@ -28,14 +28,14 @@ body {
 .react-flow__handle.os-quad-handle {
   pointer-events: auto;
 }
-.react-flow__handle.os-quad-handle:hover,
-.react-flow__handle.os-quad-handle:focus-visible {
+.react-flow__handle.os-quad-handle:hover .os-quad-handle-visual,
+.react-flow__handle.os-quad-handle:focus-visible .os-quad-handle-visual {
   box-shadow:
     0 0 0 2px rgb(56 189 248 / 0.45),
     0 0 12px rgb(56 189 248 / 0.3);
   border-color: rgb(125 211 252) !important;
 }
-.react-flow__handle.os-quad-handle.connectingto.valid {
+.react-flow__handle.os-quad-handle.connectingto.valid .os-quad-handle-visual {
   box-shadow:
     0 0 0 2px rgb(56 189 248 / 0.65),
     0 0 16px rgb(56 189 248 / 0.4);
