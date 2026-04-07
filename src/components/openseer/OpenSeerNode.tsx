@@ -73,6 +73,26 @@ function hubHandleStyle(leftPct: number, topPct: number): CSSProperties {
   };
 }
 
+const QUAD_HANDLE_CLASS =
+  "!z-[2] !h-5 !w-5 !rounded-sm !border !border-zinc-500 !bg-zinc-800";
+
+/** Targets first (left before others) and sources with right first so legacy edges without handle ids keep left/right attachment. */
+function QuadrilateralHandles({ nodeId }: { nodeId: string }) {
+  const p = nodeId;
+  return (
+    <>
+      <Handle type="target" id={`${p}__lt`} position={Position.Left} className={QUAD_HANDLE_CLASS} />
+      <Handle type="target" id={`${p}__tt`} position={Position.Top} className={QUAD_HANDLE_CLASS} />
+      <Handle type="target" id={`${p}__rt`} position={Position.Right} className={QUAD_HANDLE_CLASS} />
+      <Handle type="target" id={`${p}__bt`} position={Position.Bottom} className={QUAD_HANDLE_CLASS} />
+      <Handle type="source" id={`${p}__rs`} position={Position.Right} className={QUAD_HANDLE_CLASS} />
+      <Handle type="source" id={`${p}__ts`} position={Position.Top} className={QUAD_HANDLE_CLASS} />
+      <Handle type="source" id={`${p}__ls`} position={Position.Left} className={QUAD_HANDLE_CLASS} />
+      <Handle type="source" id={`${p}__bs`} position={Position.Bottom} className={QUAD_HANDLE_CLASS} />
+    </>
+  );
+}
+
 function thumbnailNodeSize(n: Node<OpenSeerNodeData>): { w: number; h: number } {
   if (typeof n.width === "number" && typeof n.height === "number") {
     return { w: n.width, h: n.height };
@@ -353,11 +373,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         style={{ width: fw, height: fh }}
       >
         {resizerStandard}
-        <Handle
-          type="target"
-          position={Position.Left}
-          className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-        />
+        <QuadrilateralHandles nodeId={id} />
         <div
           className="box-border flex shrink-0 flex-col justify-center gap-0.5 overflow-hidden border-b border-slate-800/80 bg-slate-950/50 px-2 py-1 leading-tight"
           style={{ height: FRAME_HEADER_RESERVE_PX }}
@@ -370,11 +386,6 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           <div className="truncate text-sm font-semibold text-zinc-100">{data.title}</div>
         </div>
         <div className="min-h-0 flex-1 rounded-b-md bg-transparent" />
-        <Handle
-          type="source"
-          position={Position.Right}
-          className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-        />
       </div>
     );
   }
@@ -393,11 +404,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         style={{ width: gw, height: gh }}
       >
         {resizerGroup}
-        <Handle
-          type="target"
-          position={Position.Left}
-          className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-        />
+        <QuadrilateralHandles nodeId={id} />
         <div className="shrink-0 border-b border-teal-900/50 bg-teal-950/40 px-2 py-1.5">
           {showTypeHeading ? (
             <span className="text-[10px] font-semibold uppercase tracking-wider text-teal-400/90">
@@ -412,11 +419,6 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           </div>
           <p className="shrink-0 text-center text-[10px] text-zinc-600">Double-click to open</p>
         </div>
-        <Handle
-          type="source"
-          position={Position.Right}
-          className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-        />
       </div>
     );
   }
@@ -525,11 +527,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           }}
         >
           {resizerStandard}
-          <Handle
-            type="target"
-            position={Position.Left}
-            className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-          />
+          <QuadrilateralHandles nodeId={id} />
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
             <div className="min-w-0 flex-1">
               {showTypeHeading ? (
@@ -571,11 +569,6 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
               <span>Set image URL or drop a file</span>
             </div>
           )}
-          <Handle
-            type="source"
-            position={Position.Right}
-            className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-          />
         </div>
         {lightbox && data.imageUrl && typeof document !== "undefined"
           ? createPortal(
@@ -701,11 +694,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
         >
           {resizerStandard}
-          <Handle
-            type="target"
-            position={Position.Left}
-            className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-          />
+          <QuadrilateralHandles nodeId={id} />
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
             <div className="min-w-0 flex-1">
               {showTypeHeading ? (
@@ -778,11 +767,6 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
               <span>Set video URL or drop a file</span>
             </div>
           )}
-          <Handle
-            type="source"
-            position={Position.Right}
-            className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-          />
         </div>
         {videoLightbox && data.videoUrl && typeof document !== "undefined"
           ? createPortal(
@@ -886,11 +870,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
         >
           {resizerStandard}
-          <Handle
-            type="target"
-            position={Position.Left}
-            className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-          />
+          <QuadrilateralHandles nodeId={id} />
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
             <div className="min-w-0 flex-1">
               {showTypeHeading ? (
@@ -992,11 +972,6 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
               </>
             )}
           </div>
-          <Handle
-            type="source"
-            position={Position.Right}
-            className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-          />
         </div>
       </>
     );
@@ -1049,11 +1024,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
       >
         {resizerStandard}
-        <Handle
-          type="target"
-          position={Position.Left}
-          className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-        />
+        <QuadrilateralHandles nodeId={id} />
         <div className="flex shrink-0 flex-col gap-1 border-b border-zinc-800/80 px-2 py-1.5">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
@@ -1125,11 +1096,6 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             </div>
           ))}
         </div>
-        <Handle
-          type="source"
-          position={Position.Right}
-          className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-        />
       </div>
     );
   }
@@ -1148,11 +1114,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
       style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
     >
       {resizerStandard}
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-      />
+      <QuadrilateralHandles nodeId={id} />
       <div
         className={[
           "border-b border-zinc-800/80 px-3 py-2",
@@ -1243,11 +1205,6 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           </div>
         ) : null}
       </div>
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-      />
     </div>
   );
 }
