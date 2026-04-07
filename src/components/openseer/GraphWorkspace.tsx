@@ -147,6 +147,7 @@ function GraphWorkspaceInner() {
   const [overviewVisible, setOverviewVisible] = useState(true);
   const [graphPanelCollapsed, setGraphPanelCollapsed] = useState(false);
   const [showNodeTypeHeadings, setShowNodeTypeHeadings] = useState(true);
+  const [gridSnapEnabled, setGridSnapEnabled] = useState(false);
 
   const selectionRef = useRef(selection);
   useLayoutEffect(() => {
@@ -308,7 +309,10 @@ function GraphWorkspaceInner() {
       const el = e.target;
       if (
         el instanceof HTMLElement &&
-        (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.tagName === "SELECT" ||
+          el.isContentEditable)
       ) {
         return;
       }
@@ -329,6 +333,13 @@ function GraphWorkspaceInner() {
       }
 
       if (!graphPointerInside.current) return;
+
+      if (k === "s") {
+        if (e.repeat) return;
+        e.preventDefault();
+        setGridSnapEnabled((v) => !v);
+        return;
+      }
 
       if (k === "h") {
         if (e.repeat) return;
@@ -948,6 +959,8 @@ function GraphWorkspaceInner() {
           panOnDrag={[1, 2]}
           selectionMode={SelectionMode.Partial}
           multiSelectionKeyCode="Shift"
+          snapToGrid={gridSnapEnabled}
+          snapGrid={[20, 20]}
         >
           <Background
             id="os-grid"
