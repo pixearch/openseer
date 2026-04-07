@@ -16,6 +16,7 @@ import {
   ReactFlowProvider,
   SelectionMode,
   useReactFlow,
+  useStoreApi,
 } from "@xyflow/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
@@ -67,6 +68,11 @@ const defaultEdgeOptions = {
 const CTX_MENU_W = 208;
 const CTX_MENU_H_NODES = 220;
 
+const ARROW_PAN_STEP_DEFAULT = 32;
+const ARROW_PAN_STEP_MIN = 4;
+const ARROW_PAN_STEP_MAX = 320;
+const ARROW_PAN_SPEED_STEP = 12;
+
 const WORKSPACE_TYPE_SET = new Set<OpenSeerNodeType>(GRAPH_WORKSPACE_NODE_TYPE_LIST);
 
 function clampRadialMenuCenter(clientX: number, clientY: number): { left: number; top: number } {
@@ -111,7 +117,9 @@ function GraphWorkspaceInner() {
   const flowAreaRef = useRef<HTMLDivElement>(null);
   const graphPointerInside = useRef(false);
   const lastGraphPointer = useRef({ x: 0, y: 0 });
+  const arrowPanStepRef = useRef(ARROW_PAN_STEP_DEFAULT);
   const { screenToFlowPosition, fitView, getNodes } = useReactFlow();
+  const store = useStoreApi();
 
   const [ready, setReady] = useState(false);
   const [graphMeta, setGraphMeta] = useState({ id: SEED_GRAPH_ID, name: SEED_GRAPH_NAME });
@@ -292,6 +300,56 @@ function GraphWorkspaceInner() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [ctxMenu, fitView, focusMode]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target;
+      if (
+        el instanceof HTMLElement &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.tagName === "SELECT" ||
+          el.isContentEditable)
+      ) {
+        return;
+      }
+      if (ctxMenu) return;
+      if (!graphPointerInside.current) return;
+
+      const code = e.code;
+      if (
+        code !== "ArrowUp" &&
+        code !== "ArrowDown" &&
+        code !== "ArrowLeft" &&
+        code !== "ArrowRight"
+      ) {
+        return;
+      }
+
+      if (e.shiftKey && (code === "ArrowUp" || code === "ArrowDown")) {
+        e.preventDefault();
+        const cur = arrowPanStepRef.current;
+        if (code === "ArrowUp") {
+          arrowPanStepRef.current = Math.min(ARROW_PAN_STEP_MAX, cur + ARROW_PAN_SPEED_STEP);
+        } else {
+          arrowPanStepRef.current = Math.max(ARROW_PAN_STEP_MIN, cur - ARROW_PAN_SPEED_STEP);
+        }
+        return;
+      }
+
+      if (e.shiftKey) return;
+
+      e.preventDefault();
+      const step = arrowPanStepRef.current;
+      const panBy = store.getState().panBy;
+      if (code === "ArrowUp") void panBy({ x: 0, y: step });
+      else if (code === "ArrowDown") void panBy({ x: 0, y: -step });
+      else if (code === "ArrowLeft") void panBy({ x: step, y: 0 });
+      else void panBy({ x: -step, y: 0 });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ctxMenu, store]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<Node<OpenSeerNodeData>>[]) => {
