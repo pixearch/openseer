@@ -140,6 +140,7 @@ function GraphWorkspaceInner() {
   }>({ nodeId: null, edgeId: null, multiNodeIds: null });
   const [textEditNodeId, setTextEditNodeId] = useState<string | null>(null);
   const [codeEditNodeId, setCodeEditNodeId] = useState<string | null>(null);
+  const [overviewVisible, setOverviewVisible] = useState(true);
 
   const selectionRef = useRef(selection);
   useLayoutEffect(() => {
@@ -272,6 +273,15 @@ function GraphWorkspaceInner() {
       }
 
       if (!graphPointerInside.current) return;
+
+      if (k === "h") {
+        if (e.repeat) return;
+        const t = e.target;
+        if (t instanceof HTMLElement && t.tagName === "SELECT") return;
+        e.preventDefault();
+        setOverviewVisible((v) => !v);
+        return;
+      }
 
       if (k === "e") {
         e.preventDefault();
@@ -902,12 +912,14 @@ function GraphWorkspaceInner() {
             Focus
           </button>
         </Panel>
-        <MiniMap
-          className="!m-3 !rounded-md !border !border-zinc-700 !bg-zinc-900/90"
-          nodeStrokeWidth={2}
-          nodeColor={(n) => minimapColorForNodeType((n as Node<OpenSeerNodeData>).data?.nodeType)}
-          maskColor="rgb(12, 12, 14, 0.85)"
-        />
+        {overviewVisible ? (
+          <MiniMap
+            className="!m-3 !rounded-md !border !border-zinc-700 !bg-zinc-900/90"
+            nodeStrokeWidth={2}
+            nodeColor={(n) => minimapColorForNodeType((n as Node<OpenSeerNodeData>).data?.nodeType)}
+            maskColor="rgb(12, 12, 14, 0.85)"
+          />
+        ) : null}
       </ReactFlow>
       {ctxMenu ? (
         <>
