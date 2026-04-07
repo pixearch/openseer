@@ -22,6 +22,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { Connection, Edge, EdgeChange, Node, NodeChange, NodeMouseHandler } from "@xyflow/react";
 import { GraphSidebar } from "@/components/openseer/GraphSidebar";
+import { ShowNodeTypeHeadingContext } from "@/components/openseer/graph-workspace-ui-context";
 import { InspectorPanel } from "@/components/openseer/InspectorPanel";
 import { OpenSeerNode } from "@/components/openseer/OpenSeerNode";
 import { RadialCreateNodeMenu } from "@/components/openseer/RadialCreateNodeMenu";
@@ -74,6 +75,9 @@ const ARROW_PAN_STEP_MAX = 320;
 const ARROW_PAN_SPEED_STEP = 12;
 
 const WORKSPACE_TYPE_SET = new Set<OpenSeerNodeType>(GRAPH_WORKSPACE_NODE_TYPE_LIST);
+
+const SESSION_GRAPH_PANEL_COLLAPSED_KEY = "openseer-graph-panel-collapsed";
+const LOCAL_SHOW_NODE_TYPE_HEADINGS_KEY = "openseer-show-node-type-headings-v1";
 
 function clampRadialMenuCenter(clientX: number, clientY: number): { left: number; top: number } {
   const m = 16;
@@ -140,6 +144,9 @@ function GraphWorkspaceInner() {
   }>({ nodeId: null, edgeId: null, multiNodeIds: null });
   const [textEditNodeId, setTextEditNodeId] = useState<string | null>(null);
   const [codeEditNodeId, setCodeEditNodeId] = useState<string | null>(null);
+  const [overviewVisible, setOverviewVisible] = useState(true);
+  const [graphPanelCollapsed, setGraphPanelCollapsed] = useState(false);
+  const [showNodeTypeHeadings, setShowNodeTypeHeadings] = useState(true);
 
   const selectionRef = useRef(selection);
   useLayoutEffect(() => {
@@ -176,6 +183,56 @@ function GraphWorkspaceInner() {
       setReady(true);
     });
     return () => window.cancelAnimationFrame(id);
+  }, []);
+
+  useEffect(() => {
+    const id = window.requestAnimationFrame(() => {
+      try {
+        setGraphPanelCollapsed(sessionStorage.getItem(SESSION_GRAPH_PANEL_COLLAPSED_KEY) === "1");
+      } catch {
+        /* ignore */
+      }
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, []);
+
+  useEffect(() => {
+    const id = window.requestAnimationFrame(() => {
+      try {
+        setShowNodeTypeHeadings(localStorage.getItem(LOCAL_SHOW_NODE_TYPE_HEADINGS_KEY) !== "0");
+      } catch {
+        /* ignore */
+      }
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, []);
+
+  const toggleGraphPanelCollapsed = useCallback(() => {
+    setGraphPanelCollapsed((c) => {
+      const next = !c;
+      try {
+        sessionStorage.setItem(SESSION_GRAPH_PANEL_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleShowNodeTypeHeadings = useCallback(() => {
+    setShowNodeTypeHeadings((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(LOCAL_SHOW_NODE_TYPE_HEADINGS_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
+  const onGraphNameChange = useCallback((name: string) => {
+    setGraphMeta((m) => ({ ...m, name }));
   }, []);
 
   useEffect(() => {
@@ -272,6 +329,15 @@ function GraphWorkspaceInner() {
       }
 
       if (!graphPointerInside.current) return;
+
+      if (k === "h") {
+        if (e.repeat) return;
+        const t = e.target;
+        if (t instanceof HTMLElement && t.tagName === "SELECT") return;
+        e.preventDefault();
+        setOverviewVisible((v) => !v);
+        return;
+      }
 
       if (k === "e") {
         e.preventDefault();
@@ -858,57 +924,61 @@ function GraphWorkspaceInner() {
           </button>
         </div>
       ) : null}
-      <ReactFlow
-        className={`min-h-0 flex-1 bg-[#0c0c0e] ${groupPath.length > 0 && !focusMode ? "pt-0" : ""}`}
-        minZoom={0.001}
-        nodes={flowNodes}
-        edges={flowEdges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onNodesDelete={onNodesDelete}
-        onEdgesDelete={onEdgesDelete}
-        onConnect={onConnect}
-        onSelectionChange={onSelectionChange}
-        onSelectionContextMenu={onSelectionContextMenu}
-        onNodeContextMenu={onNodeContextMenu}
-        onNodeDoubleClick={onNodeDoubleClick}
-        nodeTypes={nodeTypes}
-        defaultEdgeOptions={defaultEdgeOptions}
-        fitView
-        proOptions={{ hideAttribution: true }}
-        deleteKeyCode={["Backspace", "Delete"]}
-        selectionOnDrag
-        panOnDrag={[1, 2]}
-        selectionMode={SelectionMode.Partial}
-        multiSelectionKeyCode="Shift"
-      >
-        <Background
-          id="os-grid"
-          variant={BackgroundVariant.Dots}
-          gap={20}
-          size={1}
-          color="#27272a"
-        />
-        <Controls
-          className="!m-3 !border !border-zinc-700 !bg-zinc-900/95 !shadow-lg [&_button]:!border-zinc-700 [&_button]:!bg-zinc-900 [&_button]:!text-zinc-200 [&_button:hover]:!bg-zinc-800"
-          showInteractive={false}
-        />
-        <Panel position="bottom-left" className="!m-3 mb-14 ml-3">
-          <button
-            type="button"
-            onClick={() => setFocusMode(true)}
-            className="rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-xs font-medium text-zinc-200 shadow hover:bg-zinc-800"
-          >
-            Focus
-          </button>
-        </Panel>
-        <MiniMap
-          className="!m-3 !rounded-md !border !border-zinc-700 !bg-zinc-900/90"
-          nodeStrokeWidth={2}
-          nodeColor={(n) => minimapColorForNodeType((n as Node<OpenSeerNodeData>).data?.nodeType)}
-          maskColor="rgb(12, 12, 14, 0.85)"
-        />
-      </ReactFlow>
+      <ShowNodeTypeHeadingContext.Provider value={showNodeTypeHeadings}>
+        <ReactFlow
+          className={`min-h-0 flex-1 bg-[#0c0c0e] ${groupPath.length > 0 && !focusMode ? "pt-0" : ""}`}
+          minZoom={0.001}
+          nodes={flowNodes}
+          edges={flowEdges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onNodesDelete={onNodesDelete}
+          onEdgesDelete={onEdgesDelete}
+          onConnect={onConnect}
+          onSelectionChange={onSelectionChange}
+          onSelectionContextMenu={onSelectionContextMenu}
+          onNodeContextMenu={onNodeContextMenu}
+          onNodeDoubleClick={onNodeDoubleClick}
+          nodeTypes={nodeTypes}
+          defaultEdgeOptions={defaultEdgeOptions}
+          fitView
+          proOptions={{ hideAttribution: true }}
+          deleteKeyCode={["Backspace", "Delete"]}
+          selectionOnDrag
+          panOnDrag={[1, 2]}
+          selectionMode={SelectionMode.Partial}
+          multiSelectionKeyCode="Shift"
+        >
+          <Background
+            id="os-grid"
+            variant={BackgroundVariant.Dots}
+            gap={20}
+            size={1}
+            color="#27272a"
+          />
+          <Controls
+            className="!m-3 !border !border-zinc-700 !bg-zinc-900/95 !shadow-lg [&_button]:!border-zinc-700 [&_button]:!bg-zinc-900 [&_button]:!text-zinc-200 [&_button:hover]:!bg-zinc-800"
+            showInteractive={false}
+          />
+          <Panel position="bottom-left" className="!m-3 mb-14 ml-3">
+            <button
+              type="button"
+              onClick={() => setFocusMode(true)}
+              className="rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-xs font-medium text-zinc-200 shadow hover:bg-zinc-800"
+            >
+              Focus
+            </button>
+          </Panel>
+          {overviewVisible ? (
+            <MiniMap
+              className="!m-3 !rounded-md !border !border-zinc-700 !bg-zinc-900/90"
+              nodeStrokeWidth={2}
+              nodeColor={(n) => minimapColorForNodeType((n as Node<OpenSeerNodeData>).data?.nodeType)}
+              maskColor="rgb(12, 12, 14, 0.85)"
+            />
+          ) : null}
+        </ReactFlow>
+      </ShowNodeTypeHeadingContext.Provider>
       {ctxMenu ? (
         <>
           <button
@@ -992,6 +1062,11 @@ function GraphWorkspaceInner() {
       {!focusMode ? (
         <GraphSidebar
           graphName={graphMeta.name}
+          onGraphNameChange={onGraphNameChange}
+          collapsed={graphPanelCollapsed}
+          onToggleCollapsed={toggleGraphPanelCollapsed}
+          showNodeTypeHeadings={showNodeTypeHeadings}
+          onToggleShowNodeTypeHeadings={toggleShowNodeTypeHeadings}
           visibleTypes={visibleTypes}
           onToggleType={onToggleType}
           onShowAllTypes={onShowAllTypes}

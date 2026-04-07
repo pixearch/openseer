@@ -29,6 +29,7 @@ import {
 } from "@/lib/default-node";
 import { FRAME_HEADER_RESERVE_PX } from "@/lib/graph/frame-chrome";
 import { CodeEditorTextarea } from "@/components/openseer/CodeEditorTextarea";
+import { useShowNodeTypeHeading } from "@/components/openseer/graph-workspace-ui-context";
 import { documentPreviewMeta, openDocumentUrl } from "@/lib/document-open";
 import { copyAllCodeBlocks, newCodeBlockId, normalizeCodeBlocksForDisplay } from "@/lib/code-blocks";
 import {
@@ -192,6 +193,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   const [imgCtxMenu, setImgCtxMenu] = useState<{ clientX: number; clientY: number } | null>(null);
   const { setNodes } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
+  const showTypeHeading = useShowNodeTypeHeading();
   const fileRef = useRef<HTMLInputElement>(null);
   const videoFileRef = useRef<HTMLInputElement>(null);
   const documentFileRef = useRef<HTMLInputElement>(null);
@@ -360,9 +362,11 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           className="box-border flex shrink-0 flex-col justify-center gap-0.5 overflow-hidden border-b border-slate-800/80 bg-slate-950/50 px-2 py-1 leading-tight"
           style={{ height: FRAME_HEADER_RESERVE_PX }}
         >
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-            {typeLabel}
-          </span>
+          {showTypeHeading ? (
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              {typeLabel}
+            </span>
+          ) : null}
           <div className="truncate text-sm font-semibold text-zinc-100">{data.title}</div>
         </div>
         <div className="min-h-0 flex-1 rounded-b-md bg-transparent" />
@@ -395,9 +399,11 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           className="!h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
         />
         <div className="shrink-0 border-b border-teal-900/50 bg-teal-950/40 px-2 py-1.5">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-teal-400/90">
-            {typeLabel}
-          </span>
+          {showTypeHeading ? (
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-teal-400/90">
+              {typeLabel}
+            </span>
+          ) : null}
           <div className="mt-0.5 truncate text-sm font-semibold text-zinc-100">{data.title}</div>
         </div>
         <div className="flex min-h-0 flex-1 flex-col gap-1 px-2 pb-2 pt-1">
@@ -446,9 +452,11 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           />
         </svg>
         <div className="pointer-events-none absolute inset-0 z-[1] flex flex-col items-center justify-center px-8 text-center">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-violet-400/90">
-            {typeLabel}
-          </span>
+          {showTypeHeading ? (
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-violet-400/90">
+              {typeLabel}
+            </span>
+          ) : null}
           <div className="mt-1 line-clamp-2 text-sm font-semibold text-zinc-100">{data.title}</div>
         </div>
         {verts.map((v, i) => {
@@ -524,9 +532,11 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           />
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
             <div className="min-w-0 flex-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                {typeLabel}
-              </span>
+              {showTypeHeading ? (
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                  {typeLabel}
+                </span>
+              ) : null}
               <div className="truncate text-sm font-medium text-zinc-100">{data.title}</div>
             </div>
             <button
@@ -698,9 +708,11 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           />
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
             <div className="min-w-0 flex-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                {typeLabel}
-              </span>
+              {showTypeHeading ? (
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                  {typeLabel}
+                </span>
+              ) : null}
               <div className="truncate text-sm font-medium text-zinc-100">{data.title}</div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
@@ -881,9 +893,11 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           />
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
             <div className="min-w-0 flex-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                {typeLabel}
-              </span>
+              {showTypeHeading ? (
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                  {typeLabel}
+                </span>
+              ) : null}
               <div className="truncate text-sm font-medium text-zinc-100">{data.title}</div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
@@ -1043,9 +1057,11 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         <div className="flex shrink-0 flex-col gap-1 border-b border-zinc-800/80 px-2 py-1.5">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                {typeLabel}
-              </span>
+              {showTypeHeading ? (
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                  {typeLabel}
+                </span>
+              ) : null}
               <div className="truncate text-sm font-semibold text-zinc-100">{data.title}</div>
             </div>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
@@ -1143,10 +1159,17 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           isTextNode ? "shrink-0" : "",
         ].join(" ")}
       >
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-            {typeLabel}
-          </span>
+        <div
+          className={[
+            "flex items-center gap-2",
+            showTypeHeading ? "justify-between" : "justify-end",
+          ].join(" ")}
+        >
+          {showTypeHeading ? (
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              {typeLabel}
+            </span>
+          ) : null}
           <span
             className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusClass}`}
             title={data.status}
