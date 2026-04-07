@@ -36,6 +36,7 @@ import { GraphSidebar } from "@/components/openseer/GraphSidebar";
 import { ShowNodeTypeHeadingContext } from "@/components/openseer/graph-workspace-ui-context";
 import { InspectorPanel } from "@/components/openseer/InspectorPanel";
 import { OpenSeerNode } from "@/components/openseer/OpenSeerNode";
+import { NodeStyleColorPanel } from "@/components/openseer/NodeStyleColorPanel";
 import { RadialCreateNodeMenu } from "@/components/openseer/RadialCreateNodeMenu";
 import { CodeNodeEditModal } from "@/components/openseer/CodeNodeEditModal";
 import { TextNodeEditModal } from "@/components/openseer/TextNodeEditModal";
@@ -85,7 +86,9 @@ const defaultEdgeOptions = {
 };
 
 const CTX_MENU_W = 208;
-const CTX_MENU_H_NODES = 220;
+const CTX_MENU_H_NODES = 300;
+const STYLE_PANEL_W = 248;
+const STYLE_PANEL_H = 420;
 
 const ARROW_PAN_STEP_DEFAULT = 32;
 const ARROW_PAN_STEP_MIN = 4;
@@ -159,6 +162,13 @@ type CtxMenu =
       anchorNodeId: string;
     };
 
+type NodeStylePickerState = {
+  mode: "header" | "body";
+  targetIds: string[];
+  anchorData: OpenSeerNodeData;
+  position: { left: number; top: number };
+};
+
 function GraphWorkspaceInner() {
   const flowAreaRef = useRef<HTMLDivElement>(null);
   const graphPointerInside = useRef(false);
@@ -176,6 +186,7 @@ function GraphWorkspaceInner() {
   const [groupPath, setGroupPath] = useState<string[]>([]);
   const [focusMode, setFocusMode] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
+  const [nodeStylePicker, setNodeStylePicker] = useState<NodeStylePickerState | null>(null);
   const [visibleTypes, setVisibleTypes] = useState<Set<OpenSeerNodeType>>(
     () => new Set(GRAPH_WORKSPACE_NODE_TYPE_LIST)
   );
@@ -956,6 +967,24 @@ function GraphWorkspaceInner() {
     [groupPath]
   );
 
+  const onPatchNodes = useCallback(
+    (ids: string[], patch: Partial<OpenSeerNodeData>) => {
+      const set = new Set(ids);
+      setDoc((d) => {
+        const v = getViewGraph(d.nodes, d.edges, groupPath);
+        const nn = v.nodes.map((n) =>
+          set.has(n.id) ? { ...n, data: { ...n.data, ...patch } } : n
+        );
+        if (groupPath.length === 0) return { nodes: nn, edges: d.edges };
+        return {
+          nodes: patchNestedGraph(d.nodes, groupPath, nn, v.edges),
+          edges: d.edges,
+        };
+      });
+    },
+    [groupPath]
+  );
+
   const onPatchEdge = useCallback(
     (id: string, next: OpenSeerEdgeData) => {
       setDoc((d) => {
@@ -1611,6 +1640,58 @@ function GraphWorkspaceInner() {
                   Group nodes
                 </button>
               ) : null}
+              {ctxMenuAnchorNode ? (
+                <>
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                    onClick={() => {
+                      if (ctxMenu.kind !== "nodes") return;
+                      const n = ctxMenuAnchorNode;
+                      if (!n) return;
+                      const pos = clampFixedMenuPosition(
+                        ctxMenu.clientX + CTX_MENU_W + 6,
+                        ctxMenu.clientY,
+                        STYLE_PANEL_W,
+                        STYLE_PANEL_H
+                      );
+                      setNodeStylePicker({
+                        mode: "header",
+                        targetIds: [...ctxMenu.selectedIds],
+                        anchorData: n.data,
+                        position: pos,
+                      });
+                      setCtxMenu(null);
+                    }}
+                  >
+                    Change Header Color
+                  </button>
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                    onClick={() => {
+                      if (ctxMenu.kind !== "nodes") return;
+                      const n = ctxMenuAnchorNode;
+                      if (!n) return;
+                      const pos = clampFixedMenuPosition(
+                        ctxMenu.clientX + CTX_MENU_W + 6,
+                        ctxMenu.clientY,
+                        STYLE_PANEL_W,
+                        STYLE_PANEL_H
+                      );
+                      setNodeStylePicker({
+                        mode: "body",
+                        targetIds: [...ctxMenu.selectedIds],
+                        anchorData: n.data,
+                        position: pos,
+                      });
+                      setCtxMenu(null);
+                    }}
+                  >
+                    Change Background Color
+                  </button>
+                </>
+              ) : null}
               <p className="px-3 py-1 text-[11px] text-zinc-600">
                 {ctxMenu.selectedIds.length < 2
                   ? "Select 2+ nodes (Shift-click) to group nodes together."
@@ -1619,6 +1700,16 @@ function GraphWorkspaceInner() {
             </div>
           ) : null}
         </>
+      ) : null}
+      {nodeStylePicker ? (
+        <NodeStyleColorPanel
+          mode={nodeStylePicker.mode}
+          anchorData={nodeStylePicker.anchorData}
+          targetIds={nodeStylePicker.targetIds}
+          onLivePatch={onPatchNodes}
+          onClose={() => setNodeStylePicker(null)}
+          position={nodeStylePicker.position}
+        />
       ) : null}
     </div>
   );
