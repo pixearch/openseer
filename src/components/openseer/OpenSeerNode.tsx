@@ -73,8 +73,8 @@ function hubHandleStyle(leftPct: number, topPct: number): CSSProperties {
   };
 }
 
-/** Nudge past the node edge so handles read clearly outside the body (RF defaults center on the padding edge). */
-const QUAD_HANDLE_OUTSET_PX = 6;
+/** RF anchors handle center on the node edge; h-5 w-5 (20px) needs ≥10px outset so no handle area sits inside the node. */
+const QUAD_HANDLE_OUTSET_PX = 12;
 
 function quadHandleOutsetStyle(position: Position): CSSProperties {
   const o = QUAD_HANDLE_OUTSET_PX;
