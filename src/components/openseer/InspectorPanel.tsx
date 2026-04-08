@@ -7,7 +7,11 @@ import { useDebouncedPatchNode } from "@/hooks/use-debounced-graph-patch";
 import { copyAllCodeBlocks, newCodeBlockId, normalizeCodeBlocksForDisplay } from "@/lib/code-blocks";
 import { DEFAULT_TITLE_BY_TYPE } from "@/lib/node-type-meta";
 import { parseYoutubeVideoId } from "@/lib/youtube";
-import type { OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
+import type {
+  OpenSeerEdgeData,
+  OpenSeerEdgeRouting,
+  OpenSeerNodeData,
+} from "@/lib/types/graph";
 import { OPEN_SEER_STATUSES } from "@/lib/types/graph";
 
 function Field({
@@ -750,6 +754,7 @@ export function InspectorPanel({
 
   if (selectedEdge && !selectedNode) {
     const d = selectedEdge.data ?? { label: "relates_to", relationshipType: "relates_to" };
+    const routing: OpenSeerEdgeRouting = d.type ?? "orthogonal";
     return (
       <aside className="flex h-full w-[340px] shrink-0 flex-col border-l border-zinc-800 bg-zinc-950/95">
         <div className="border-b border-zinc-800 px-4 py-3">
@@ -763,8 +768,8 @@ export function InspectorPanel({
               value={d.label}
               onChange={(e) =>
                 onPatchEdge(selectedEdge.id, {
+                  ...d,
                   label: e.target.value,
-                  relationshipType: d.relationshipType,
                 })
               }
             />
@@ -775,11 +780,27 @@ export function InspectorPanel({
               value={d.relationshipType}
               onChange={(e) =>
                 onPatchEdge(selectedEdge.id, {
-                  label: d.label,
+                  ...d,
                   relationshipType: e.target.value,
                 })
               }
             />
+          </Field>
+          <Field label="Edge type">
+            <select
+              className={inputClass}
+              value={routing}
+              onChange={(e) =>
+                onPatchEdge(selectedEdge.id, {
+                  ...d,
+                  type: e.target.value as OpenSeerEdgeRouting,
+                })
+              }
+            >
+              <option value="straight">Straight</option>
+              <option value="orthogonal">Orthogonal</option>
+              <option value="bezier">Curved</option>
+            </select>
           </Field>
           <button
             type="button"

@@ -14,6 +14,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -38,6 +39,7 @@ import {
   NODE_TYPE_ACCENT_CLASS,
   NODE_TYPE_LABEL,
 } from "@/lib/node-type-meta";
+import { getNodeChromeStyles } from "@/lib/node-style-chrome";
 import type { CodeBlockEntry, OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
 import { parseYoutubeVideoId, youtubeThumbnailUrl } from "@/lib/youtube";
 
@@ -69,8 +71,21 @@ function hubHandleStyle(leftPct: number, topPct: number): CSSProperties {
   return {
     left: `${leftPct}%`,
     top: `${topPct}%`,
+    /* Override .react-flow__handle-{top,right,bottom,left} so vertex % + translate wins. */
+    right: "auto",
+    bottom: "auto",
     transform: "translate(-50%, -50%)",
   };
+}
+
+/** React Flow attaches edges to the handle edge for this Position; pick the outward side from hub center. */
+function hubHandleCardinalPosition(v: { x: number; y: number }, cx: number, cy: number): Position {
+  const dx = v.x - cx;
+  const dy = v.y - cy;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0 ? Position.Right : Position.Left;
+  }
+  return dy >= 0 ? Position.Bottom : Position.Top;
 }
 
 /** Large transparent hit target; small visible tab is `.os-quad-handle-visual` inside. z-0 keeps handles under the node face (see OS_QUAD_NODE_FACE). */
@@ -362,7 +377,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
 
   const hubRootRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (data.nodeType !== "hub") return;
     updateNodeInternals(id);
   }, [data.hubSides, data.nodeType, id, updateNodeInternals, w, h]);
@@ -419,6 +434,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   const accent = NODE_TYPE_ACCENT_CLASS[data.nodeType];
   const typeLabel = NODE_TYPE_LABEL[data.nodeType];
   const statusClass = STATUS_DOT[data.status] ?? "bg-zinc-500";
+  const chrome = getNodeChromeStyles(data);
 
   const previewTags = data.tags.slice(0, 2);
   const moreTags = data.tags.length > 2 ? data.tags.length - 2 : 0;
@@ -451,7 +467,8 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
     return (
       <div
         className={[
-          "relative flex min-h-0 flex-col overflow-visible rounded-lg border-2 border-dashed border-slate-500/80 bg-zinc-950/40 shadow-lg",
+          "relative flex min-h-0 flex-col overflow-visible rounded-lg border-2 border-dashed border-slate-500/80 shadow-lg",
+          chrome.useTransparentOuter ? "bg-transparent" : "bg-zinc-950/40",
           selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
         ].join(" ")}
         style={{ width: fw, height: fh }}
@@ -460,8 +477,13 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         <QuadrilateralHandles nodeId={id} />
         <div className={`${OS_QUAD_NODE_FACE} flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg`}>
         <div
-          className="box-border flex shrink-0 flex-col justify-center gap-0.5 overflow-hidden border-b border-slate-800/80 bg-slate-950/50 px-2 py-1 leading-tight"
-          style={{ height: FRAME_HEADER_RESERVE_PX }}
+          className={[
+            "box-border flex shrink-0 flex-col justify-center gap-0.5 overflow-hidden border-b border-slate-800/80 px-2 py-1 leading-tight",
+            chrome.useTransparentOuter && !chrome.headerStyle ? "bg-slate-950/50" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          style={{ height: FRAME_HEADER_RESERVE_PX, ...chrome.headerStyle }}
         >
           {showTypeHeading ? (
             <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
@@ -470,7 +492,15 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           ) : null}
           <div className="truncate text-sm font-semibold text-zinc-100">{data.title}</div>
         </div>
-        <div className="min-h-0 flex-1 rounded-b-md bg-transparent" />
+        <div
+          className={[
+            "min-h-0 flex-1 rounded-b-md",
+            chrome.bodyStyle ? "" : chrome.useTransparentOuter ? "bg-zinc-950/40" : "bg-transparent",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          style={chrome.bodyStyle}
+        />
         </div>
       </div>
     );
@@ -484,7 +514,8 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
     return (
       <div
         className={[
-          "relative flex min-h-0 flex-col overflow-visible rounded-lg border-2 border-dashed border-teal-600/70 bg-zinc-950/90 shadow-lg",
+          "relative flex min-h-0 flex-col overflow-visible rounded-lg border-2 border-dashed border-teal-600/70 shadow-lg",
+          chrome.useTransparentOuter ? "bg-transparent" : "bg-zinc-950/90",
           selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
         ].join(" ")}
         style={{ width: gw, height: gh }}
@@ -492,7 +523,15 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         {resizerGroup}
         <QuadrilateralHandles nodeId={id} />
         <div className={`${OS_QUAD_NODE_FACE} flex min-h-0 flex-1 flex-col rounded-lg`}>
-        <div className="shrink-0 border-b border-teal-900/50 bg-teal-950/40 px-2 py-1.5">
+        <div
+          className={[
+            "shrink-0 border-b border-teal-900/50 px-2 py-1.5",
+            chrome.useTransparentOuter && !chrome.headerStyle ? "bg-teal-950/40" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          style={chrome.headerStyle}
+        >
           {showTypeHeading ? (
             <span className="text-[10px] font-semibold uppercase tracking-wider text-teal-400/90">
               {typeLabel}
@@ -500,7 +539,15 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           ) : null}
           <div className="mt-0.5 truncate text-sm font-semibold text-zinc-100">{data.title}</div>
         </div>
-        <div className="flex min-h-0 flex-1 flex-col gap-1 px-2 pb-2 pt-1">
+        <div
+          className={[
+            "flex min-h-0 flex-1 flex-col gap-1 px-2 pb-2 pt-1",
+            chrome.bodyStyle ? "" : chrome.useTransparentOuter ? "bg-zinc-950/90" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          style={chrome.bodyStyle}
+        >
           <div className="min-h-[96px] min-w-0 flex-1">
             <NestedGraphThumbnail nodes={nested} edges={nestedEdges} />
           </div>
@@ -535,7 +582,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         >
           <polygon
             points={points}
-            fill="rgb(24 24 27 / 0.95)"
+            fill={chrome.hubFill ?? "rgb(24 24 27 / 0.95)"}
             stroke="rgb(139 92 246 / 0.5)"
             strokeWidth={1.5}
             strokeLinejoin="round"
@@ -551,22 +598,15 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         </div>
         {verts.map((v, i) => {
           const st = hubHandleStyle((v.x / bw) * 100, (v.y / bh) * 100);
+          const hp = hubHandleCardinalPosition(v, bw / 2, bh / 2);
           return (
             <span key={i} className="contents">
-              <Handle
-                type="target"
-                id={`hub-${i}-t`}
-                position={Position.Top}
-                className="!z-[2] !h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-                style={st}
-              />
-              <Handle
-                type="source"
-                id={`hub-${i}-s`}
-                position={Position.Top}
-                className="!z-[2] !h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-                style={st}
-              />
+              <Handle type="target" id={`hub-${i}-t`} position={hp} className={QUAD_HANDLE_CLASS} style={st}>
+                <QuadHandleFace position={hp} />
+              </Handle>
+              <Handle type="source" id={`hub-${i}-s`} position={hp} className={QUAD_HANDLE_CLASS} style={st}>
+                <QuadHandleFace position={hp} />
+              </Handle>
             </span>
           );
         })}
@@ -602,22 +642,26 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         />
         <div
           className={[
-            "relative flex min-h-0 flex-col overflow-visible rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
+            "relative flex min-h-0 flex-col overflow-visible rounded-md border border-zinc-700/90 shadow-lg",
+            chrome.useTransparentOuter ? "bg-transparent" : "bg-zinc-900/95",
             "border-l-[3px]",
             accent,
             selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
           ].join(" ")}
           style={{ width: w ?? NODE_STANDARD_WIDTH, height: h ?? NODE_STANDARD_HEIGHT }}
-          onContextMenu={(e: ReactMouseEvent) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setImgCtxMenu({ clientX: e.clientX, clientY: e.clientY });
-          }}
         >
           {resizerStandard}
           <QuadrilateralHandles nodeId={id} />
           <div className={`${OS_QUAD_NODE_FACE} flex min-h-0 flex-1 flex-col overflow-hidden rounded-md`}>
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
+          <div
+            className={[
+              "flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1",
+              chrome.useTransparentOuter && !chrome.headerStyle ? "bg-zinc-900/95" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            style={chrome.headerStyle}
+          >
             <div className="min-w-0 flex-1">
               {showTypeHeading ? (
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -634,13 +678,30 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
               Load…
             </button>
           </div>
+          <div
+            className={[
+              "flex min-h-0 flex-1 flex-col",
+              chrome.bodyStyle ? "" : chrome.useTransparentOuter ? "bg-zinc-900/95" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            style={chrome.bodyStyle}
+          >
           {data.imageUrl ? (
             <button
               type="button"
-              className="flex min-h-0 w-full flex-1 cursor-zoom-in items-center justify-center bg-zinc-950 focus:outline-none"
+              className={[
+                "flex min-h-0 w-full flex-1 cursor-zoom-in items-center justify-center focus:outline-none",
+                chrome.bodyStyle ? "bg-transparent" : "bg-zinc-950",
+              ].join(" ")}
               onClick={() => setLightbox(true)}
               onDragOver={onImageDragOver}
               onDrop={onImageDrop}
+              onContextMenu={(e: ReactMouseEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setImgCtxMenu({ clientX: e.clientX, clientY: e.clientY });
+              }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -651,13 +712,22 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             </button>
           ) : (
             <div
-              className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 bg-zinc-950 px-2 text-center text-xs text-zinc-600"
+              className={[
+                "flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-2 text-center text-xs text-zinc-600",
+                chrome.bodyStyle ? "bg-transparent" : "bg-zinc-950",
+              ].join(" ")}
               onDragOver={onImageDragOver}
               onDrop={onImageDrop}
+              onContextMenu={(e: ReactMouseEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setImgCtxMenu({ clientX: e.clientX, clientY: e.clientY });
+              }}
             >
               <span>Set image URL or drop a file</span>
             </div>
           )}
+          </div>
           </div>
         </div>
         {lightbox && data.imageUrl && typeof document !== "undefined"
@@ -776,7 +846,8 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         />
         <div
           className={[
-            "relative flex min-h-0 flex-col overflow-visible rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
+            "relative flex min-h-0 flex-col overflow-visible rounded-md border border-zinc-700/90 shadow-lg",
+            chrome.useTransparentOuter ? "bg-transparent" : "bg-zinc-900/95",
             "border-l-[3px]",
             accent,
             selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
@@ -786,7 +857,15 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           {resizerStandard}
           <QuadrilateralHandles nodeId={id} />
           <div className={`${OS_QUAD_NODE_FACE} flex min-h-0 flex-1 flex-col overflow-hidden rounded-md`}>
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
+          <div
+            className={[
+              "flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1",
+              chrome.useTransparentOuter && !chrome.headerStyle ? "bg-zinc-900/95" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            style={chrome.headerStyle}
+          >
             <div className="min-w-0 flex-1">
               {showTypeHeading ? (
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -822,10 +901,22 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
               ) : null}
             </div>
           </div>
+          <div
+            className={[
+              "flex min-h-0 flex-1 flex-col",
+              chrome.bodyStyle ? "" : chrome.useTransparentOuter ? "bg-zinc-900/95" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            style={chrome.bodyStyle}
+          >
           {data.videoUrl ? (
             <button
               type="button"
-              className="flex min-h-0 w-full flex-1 cursor-zoom-in items-center justify-center bg-zinc-950 focus:outline-none"
+              className={[
+                "flex min-h-0 w-full flex-1 cursor-zoom-in items-center justify-center focus:outline-none",
+                chrome.bodyStyle ? "bg-transparent" : "bg-zinc-950",
+              ].join(" ")}
               onClick={() => setVideoLightbox(true)}
               onDragOver={onVideoDragOver}
               onDrop={onVideoDrop}
@@ -851,13 +942,17 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             </button>
           ) : (
             <div
-              className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 bg-zinc-950 px-2 text-center text-xs text-zinc-600"
+              className={[
+                "flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-2 text-center text-xs text-zinc-600",
+                chrome.bodyStyle ? "bg-transparent" : "bg-zinc-950",
+              ].join(" ")}
               onDragOver={onVideoDragOver}
               onDrop={onVideoDrop}
             >
               <span>Set video URL or drop a file</span>
             </div>
           )}
+          </div>
           </div>
         </div>
         {videoLightbox && data.videoUrl && typeof document !== "undefined"
@@ -954,7 +1049,8 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         />
         <div
           className={[
-            "relative flex min-h-0 flex-col overflow-visible rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
+            "relative flex min-h-0 flex-col overflow-visible rounded-md border border-zinc-700/90 shadow-lg",
+            chrome.useTransparentOuter ? "bg-transparent" : "bg-zinc-900/95",
             "border-l-[3px]",
             accent,
             selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
@@ -964,7 +1060,15 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           {resizerStandard}
           <QuadrilateralHandles nodeId={id} />
           <div className={`${OS_QUAD_NODE_FACE} flex min-h-0 flex-1 flex-col overflow-hidden rounded-md`}>
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1">
+          <div
+            className={[
+              "flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1",
+              chrome.useTransparentOuter && !chrome.headerStyle ? "bg-zinc-900/95" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            style={chrome.headerStyle}
+          >
             <div className="min-w-0 flex-1">
               {showTypeHeading ? (
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -1011,7 +1115,13 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             </div>
           </div>
           <div
-            className="flex min-h-0 flex-1 flex-col items-stretch justify-center gap-2 bg-zinc-950 px-3 py-2"
+            className={[
+              "flex min-h-0 flex-1 flex-col items-stretch justify-center gap-2 px-3 py-2",
+              chrome.bodyStyle ? "" : "bg-zinc-950",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            style={chrome.bodyStyle}
             onDragOver={onDocDragOver}
             onDrop={onDocDrop}
           >
@@ -1110,7 +1220,8 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
     return (
       <div
         className={[
-          "relative flex min-h-0 flex-col overflow-visible rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg",
+          "relative flex min-h-0 flex-col overflow-visible rounded-md border border-zinc-700/90 shadow-lg",
+          chrome.useTransparentOuter ? "bg-transparent" : "bg-zinc-900/95",
           "border-l-[3px]",
           accent,
           selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
@@ -1120,7 +1231,15 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         {resizerStandard}
         <QuadrilateralHandles nodeId={id} />
         <div className={`${OS_QUAD_NODE_FACE} flex min-h-0 flex-1 flex-col overflow-hidden rounded-md`}>
-        <div className="flex shrink-0 flex-col gap-1 border-b border-zinc-800/80 px-2 py-1.5">
+        <div
+          className={[
+            "flex shrink-0 flex-col gap-1 border-b border-zinc-800/80 px-2 py-1.5",
+            chrome.useTransparentOuter && !chrome.headerStyle ? "bg-zinc-900/95" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          style={chrome.headerStyle}
+        >
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               {showTypeHeading ? (
@@ -1151,7 +1270,15 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           </div>
           <p className="text-[9px] text-zinc-600">Double-click node for full editor</p>
         </div>
-        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 py-2">
+        <div
+          className={[
+            "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 py-2",
+            chrome.bodyStyle ? "" : chrome.useTransparentOuter ? "bg-zinc-900/95" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          style={chrome.bodyStyle}
+        >
           {blocks.map((block) => (
             <div
               key={block.id}
@@ -1201,7 +1328,8 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   return (
     <div
       className={[
-        "relative rounded-md border border-zinc-700/90 bg-zinc-900/95 shadow-lg backdrop-blur-sm",
+        "relative rounded-md border border-zinc-700/90 shadow-lg backdrop-blur-sm",
+        chrome.useTransparentOuter ? "bg-transparent" : "bg-zinc-900/95",
         "border-l-[3px]",
         accent,
         selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
@@ -1222,7 +1350,11 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         className={[
           "border-b border-zinc-800/80 px-3 py-2",
           isTextNode ? "shrink-0" : "",
-        ].join(" ")}
+          chrome.useTransparentOuter && !chrome.headerStyle ? "bg-zinc-900/95" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        style={chrome.headerStyle}
       >
         <div
           className={[
@@ -1247,7 +1379,11 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           isTextNode
             ? "flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 py-2"
             : "space-y-2 px-3 py-2",
-        ].join(" ")}
+          chrome.bodyStyle ? "" : chrome.useTransparentOuter ? "bg-zinc-900/95" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        style={chrome.bodyStyle}
       >
         {data.nodeType === "evidence" && data.imageUrl ? (
           <div className="overflow-hidden rounded border border-zinc-800">

@@ -114,13 +114,27 @@ export interface OpenSeerNodeData {
   /** Hub node: regular polygon side count (3–16), default 6 */
   hubSides?: number;
 
+  /** Custom header strip color (`hsl(H S% L%)`); independent from body */
+  styleHeaderColor?: string;
+  /** Custom body/card fill color (`hsl(H S% L%)`); alpha from styleBodyOpacity */
+  styleBodyColor?: string;
+  /** Body fill opacity 0–1; only affects styleBodyColor */
+  styleBodyOpacity?: number;
+
   /** Satisfies React Flow node data constraint */
   [key: string]: unknown;
 }
 
+/** Stored edge routing (maps to React Flow edge `type` when rendering). */
+export type OpenSeerEdgeRouting = "straight" | "orthogonal" | "bezier";
+
 export interface OpenSeerEdgeData {
   label: string;
   relationshipType: string;
+  /** Path style; omitted means orthogonal. */
+  type?: OpenSeerEdgeRouting;
+  /** Reserved for future manual routing. */
+  controlPoints?: unknown[];
   [key: string]: unknown;
 }
 
