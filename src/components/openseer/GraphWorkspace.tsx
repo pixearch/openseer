@@ -15,7 +15,9 @@ import {
   ReactFlow,
   ReactFlowProvider,
   SelectionMode,
+  getSimpleBezierPath,
   getSmoothStepPath,
+  getStraightPath,
   useReactFlow,
   useStoreApi,
 } from "@xyflow/react";
@@ -26,6 +28,7 @@ import type {
   Connection,
   Edge,
   EdgeChange,
+  EdgeMouseHandler,
   Node,
   NodeChange,
   NodeMouseHandler,
@@ -62,6 +65,8 @@ import {
   getViewGraph,
   groupSelectedNodes,
   patchNestedGraph,
+  sanitizeHubEdgesForLevel,
+  sanitizeHubHandlesInDoc,
   sortParentsBeforeChildren,
   titlesAlongPath,
   ungroupFrame,
@@ -74,7 +79,12 @@ import {
   saveGraphDocument,
 } from "@/lib/services/graph-storage";
 import { clampFixedMenuPosition } from "@/lib/ui/clamp-context-menu";
-import type { OpenSeerEdgeData, OpenSeerNodeData, OpenSeerNodeType } from "@/lib/types/graph";
+import type {
+  OpenSeerEdgeData,
+  OpenSeerEdgeRouting,
+  OpenSeerNodeData,
+  OpenSeerNodeType,
+} from "@/lib/types/graph";
 import { GRAPH_WORKSPACE_NODE_TYPE_LIST } from "@/lib/types/graph";
 
 const nodeTypes = { openSeer: OpenSeerNode };
@@ -83,10 +93,24 @@ const defaultEdgeOptions = {
   type: "smoothstep" as const,
   markerEnd: { type: MarkerType.ArrowClosed, color: "#64748b", width: 18, height: 18 },
   style: { stroke: "#64748b", strokeWidth: 1.5 },
+  selectable: true,
+  interactionWidth: 24,
 };
+
+function routingToRfType(r: OpenSeerEdgeRouting | undefined): "straight" | "smoothstep" | "simplebezier" {
+  switch (r ?? "orthogonal") {
+    case "straight":
+      return "straight";
+    case "bezier":
+      return "simplebezier";
+    default:
+      return "smoothstep";
+  }
+}
 
 const CTX_MENU_W = 208;
 const CTX_MENU_H_NODES = 300;
+const CTX_MENU_H_EDGE = 168;
 const STYLE_PANEL_W = 248;
 const STYLE_PANEL_H = 420;
 
@@ -160,6 +184,12 @@ type CtxMenu =
       clientY: number;
       selectedIds: string[];
       anchorNodeId: string;
+    }
+  | {
+      kind: "edge";
+      clientX: number;
+      clientY: number;
+      edgeId: string;
     };
 
 type NodeStylePickerState = {
@@ -233,6 +263,7 @@ function GraphWorkspaceInner() {
   const edgeInsertGrabNodeIdRef = useRef<string | null>(null);
   const edgeInsertHoverIdRef = useRef<string | null>(null);
   const [edgeInsertHoverId, setEdgeInsertHoverId] = useState<string | null>(null);
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
 
   const alignOverlayContainerRef = useRef<HTMLDivElement>(null);
 
@@ -294,21 +325,20 @@ function GraphWorkspaceInner() {
     const id = window.requestAnimationFrame(() => {
       const saved = loadGraphDocument();
       if (saved) {
-        setDoc({
-          nodes: clampFrameChildrenEverywhere(saved.nodes as Node<OpenSeerNodeData>[]),
-          edges: saved.edges as Edge<OpenSeerEdgeData>[],
-        });
+        const clamped = clampFrameChildrenEverywhere(saved.nodes as Node<OpenSeerNodeData>[]);
+        const { nodes, edges } = sanitizeHubHandlesInDoc(
+          clamped,
+          saved.edges as Edge<OpenSeerEdgeData>[]
+        );
+        setDoc({ nodes, edges });
         setGraphMeta({ id: saved.id, name: saved.name });
       } else {
         const seed = createGitOnboardingSeed();
-        setDoc({
-          nodes: clampFrameChildrenEverywhere(seed.nodes),
-          edges: seed.edges,
-        });
+        const clamped = clampFrameChildrenEverywhere(seed.nodes);
+        const { nodes, edges } = sanitizeHubHandlesInDoc(clamped, seed.edges);
+        setDoc({ nodes, edges });
         setGraphMeta({ id: SEED_GRAPH_ID, name: SEED_GRAPH_NAME });
-        saveGraphDocument(
-          documentFromState(SEED_GRAPH_NAME, SEED_GRAPH_ID, seed.nodes, seed.edges)
-        );
+        saveGraphDocument(documentFromState(SEED_GRAPH_NAME, SEED_GRAPH_ID, nodes, edges));
       }
       setReady(true);
     });
@@ -699,9 +729,14 @@ function GraphWorkspaceInner() {
         const nn = applyNodeChanges(effectiveChanges, v.nodes);
         const clamped = clampFrameChildrenPositions(nn);
         const ordered = sortParentsBeforeChildren(clamped);
-        if (path.length === 0) return { nodes: ordered, edges: d.edges };
+        const viewEdges = sanitizeHubEdgesForLevel(ordered, v.edges);
+        if (path.length === 0) {
+          return viewEdges === v.edges
+            ? { nodes: ordered, edges: d.edges }
+            : { nodes: ordered, edges: viewEdges };
+        }
         return {
-          nodes: patchNestedGraph(d.nodes, path, ordered, v.edges),
+          nodes: patchNestedGraph(d.nodes, path, ordered, viewEdges),
           edges: d.edges,
         };
       });
@@ -845,21 +880,43 @@ function GraphWorkspaceInner() {
         isVisibleOnCanvas(t, visibleTypes)
       );
     });
-    if (!edgeInsertHoverId) return list;
-    return list.map((e) =>
-      e.id === edgeInsertHoverId
-        ? {
-            ...e,
-            style: {
-              ...e.style,
-              stroke: "#38bdf8",
-              strokeWidth: (typeof e.style?.strokeWidth === "number" ? e.style.strokeWidth : 1.5) + 2,
-            },
-            zIndex: 1000,
-          }
-        : e
-    );
-  }, [view.edges, view.nodes, visibleTypes, edgeInsertHoverId]);
+    const base = list.map((e) => {
+      const data = e.data as OpenSeerEdgeData | undefined;
+      const routing = data?.type ?? "orthogonal";
+      const rfType = routingToRfType(routing);
+      const insert = edgeInsertHoverId === e.id;
+      const sel = e.selected === true;
+      const hov = hoveredEdgeId === e.id && !sel;
+      const baseW = 1.5;
+      let stroke = "#64748b";
+      let strokeWidth = baseW;
+      if (insert) {
+        stroke = "#38bdf8";
+        strokeWidth = baseW + 2;
+      } else if (sel) {
+        stroke = "#38bdf8";
+        strokeWidth = 2.5;
+      } else if (hov) {
+        stroke = "#94a3b8";
+        strokeWidth = 2;
+      }
+      return {
+        ...e,
+        type: rfType,
+        selectable: true,
+        interactionWidth: 24,
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: stroke,
+          width: 18,
+          height: 18,
+        },
+        style: { ...e.style, stroke, strokeWidth },
+        zIndex: insert ? 1000 : e.zIndex,
+      };
+    });
+    return base;
+  }, [view.edges, view.nodes, visibleTypes, edgeInsertHoverId, hoveredEdgeId]);
 
   const updateEdgeInsertHover = useCallback(
     (e: { clientX: number; clientY: number }, draggedNodeId: string) => {
@@ -885,9 +942,6 @@ function GraphWorkspaceInner() {
       for (const edge of flowEdges) {
         if (edge.source === draggedNodeId || edge.target === draggedNodeId) continue;
 
-        const t = edge.type ?? "smoothstep";
-        if (t !== "smoothstep" && t !== "step") continue;
-
         const sourceNode = nodeLookup.get(edge.source);
         const targetNode = nodeLookup.get(edge.target);
         if (!sourceNode || !targetNode) continue;
@@ -902,14 +956,34 @@ function GraphWorkspaceInner() {
         });
         if (!pos) continue;
 
+        const rfType = edge.type ?? "smoothstep";
         const pathOpts = (edge as { pathOptions?: { offset?: number; stepPosition?: number } })
           .pathOptions;
-        const [pathD] = getSmoothStepPath({
-          ...pos,
-          borderRadius: t === "step" ? 0 : undefined,
-          offset: pathOpts?.offset,
-          stepPosition: pathOpts?.stepPosition,
-        });
+        let pathD: string;
+        if (rfType === "straight") {
+          [pathD] = getStraightPath({
+            sourceX: pos.sourceX,
+            sourceY: pos.sourceY,
+            targetX: pos.targetX,
+            targetY: pos.targetY,
+          });
+        } else if (rfType === "simplebezier") {
+          [pathD] = getSimpleBezierPath({
+            sourceX: pos.sourceX,
+            sourceY: pos.sourceY,
+            sourcePosition: pos.sourcePosition,
+            targetX: pos.targetX,
+            targetY: pos.targetY,
+            targetPosition: pos.targetPosition,
+          });
+        } else {
+          [pathD] = getSmoothStepPath({
+            ...pos,
+            borderRadius: undefined,
+            offset: pathOpts?.offset,
+            stepPosition: pathOpts?.stepPosition,
+          });
+        }
         const dist = distancePointToSvgPath(flowPos.x, flowPos.y, pathD);
         if (dist < bestD) {
           bestD = dist;
@@ -989,7 +1063,17 @@ function GraphWorkspaceInner() {
     (id: string, next: OpenSeerEdgeData) => {
       setDoc((d) => {
         const v = getViewGraph(d.nodes, d.edges, groupPath);
-        const ne = v.edges.map((e) => (e.id === id ? { ...e, label: next.label, data: next } : e));
+        const ne = v.edges.map((e) => {
+          if (e.id !== id) return e;
+          const prev = (e.data ?? {}) as Partial<OpenSeerEdgeData>;
+          const merged: OpenSeerEdgeData = {
+            ...prev,
+            ...next,
+            label: next.label ?? prev.label ?? String(e.label ?? "relates_to"),
+            relationshipType: next.relationshipType ?? prev.relationshipType ?? "relates_to",
+          };
+          return { ...e, label: merged.label, data: merged };
+        });
         if (groupPath.length === 0) return { nodes: d.nodes, edges: ne };
         return {
           nodes: patchNestedGraph(d.nodes, groupPath, v.nodes, ne),
@@ -1050,7 +1134,9 @@ function GraphWorkspaceInner() {
 
   const onLoadDemo = useCallback(() => {
     const seed = createGitOnboardingSeed();
-    setDoc({ nodes: clampFrameChildrenEverywhere(seed.nodes), edges: seed.edges });
+    const clamped = clampFrameChildrenEverywhere(seed.nodes);
+    const { nodes, edges } = sanitizeHubHandlesInDoc(clamped, seed.edges);
+    setDoc({ nodes, edges });
     setGraphMeta({ id: SEED_GRAPH_ID, name: SEED_GRAPH_NAME });
     setGroupPath([]);
     setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
@@ -1193,6 +1279,24 @@ function GraphWorkspaceInner() {
     },
     []
   );
+
+  const onEdgeContextMenu: EdgeMouseHandler<Edge<OpenSeerEdgeData>> = useCallback((e, edge) => {
+    e.preventDefault();
+    setCtxMenu({
+      kind: "edge",
+      clientX: e.clientX,
+      clientY: e.clientY,
+      edgeId: edge.id,
+    });
+  }, []);
+
+  const onEdgeMouseEnter: EdgeMouseHandler<Edge<OpenSeerEdgeData>> = useCallback((_e, edge) => {
+    setHoveredEdgeId(edge.id);
+  }, []);
+
+  const onEdgeMouseLeave: EdgeMouseHandler<Edge<OpenSeerEdgeData>> = useCallback(() => {
+    setHoveredEdgeId(null);
+  }, []);
 
   const onNodeDragStart: OnNodeDrag<Node<OpenSeerNodeData>> = useCallback((_e, node) => {
     const pm = proportionalLayoutRef.current;
@@ -1458,8 +1562,12 @@ function GraphWorkspaceInner() {
           onNodeDragStart={onNodeDragStart}
           onNodeDragStop={onNodeDragStop}
           onNodeDoubleClick={onNodeDoubleClick}
+          onEdgeContextMenu={onEdgeContextMenu}
+          onEdgeMouseEnter={onEdgeMouseEnter}
+          onEdgeMouseLeave={onEdgeMouseLeave}
           nodeTypes={nodeTypes}
           defaultEdgeOptions={defaultEdgeOptions}
+          elementsSelectable
           fitView
           proOptions={{ hideAttribution: true }}
           deleteKeyCode={["Backspace", "Delete"]}
@@ -1697,6 +1805,49 @@ function GraphWorkspaceInner() {
                   ? "Select 2+ nodes (Shift-click) to group nodes together."
                   : ""}
               </p>
+            </div>
+          ) : ctxMenu.kind === "edge" ? (
+            <div
+              className="fixed z-50 w-52 rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
+              style={(() => {
+                const { left, top } = clampFixedMenuPosition(
+                  ctxMenu.clientX,
+                  ctxMenu.clientY,
+                  CTX_MENU_W,
+                  CTX_MENU_H_EDGE
+                );
+                return { left, top };
+              })()}
+            >
+              <p className="px-3 py-1 text-[11px] font-medium uppercase text-zinc-500">Edge type</p>
+              {(
+                [
+                  ["straight", "Straight"],
+                  ["orthogonal", "Orthogonal"],
+                  ["bezier", "Curved"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                  onClick={() => {
+                    if (ctxMenu.kind !== "edge") return;
+                    const ed = view.edges.find((x) => x.id === ctxMenu.edgeId);
+                    if (!ed) return;
+                    const prev = ed.data as OpenSeerEdgeData | undefined;
+                    onPatchEdge(ctxMenu.edgeId, {
+                      ...prev,
+                      label: String(ed.label ?? prev?.label ?? "relates_to"),
+                      relationshipType: prev?.relationshipType ?? "relates_to",
+                      type: value,
+                    });
+                    setCtxMenu(null);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           ) : null}
         </>

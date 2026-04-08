@@ -14,6 +14,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -70,8 +71,21 @@ function hubHandleStyle(leftPct: number, topPct: number): CSSProperties {
   return {
     left: `${leftPct}%`,
     top: `${topPct}%`,
+    /* Override .react-flow__handle-{top,right,bottom,left} so vertex % + translate wins. */
+    right: "auto",
+    bottom: "auto",
     transform: "translate(-50%, -50%)",
   };
+}
+
+/** React Flow attaches edges to the handle edge for this Position; pick the outward side from hub center. */
+function hubHandleCardinalPosition(v: { x: number; y: number }, cx: number, cy: number): Position {
+  const dx = v.x - cx;
+  const dy = v.y - cy;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0 ? Position.Right : Position.Left;
+  }
+  return dy >= 0 ? Position.Bottom : Position.Top;
 }
 
 /** Large transparent hit target; small visible tab is `.os-quad-handle-visual` inside. z-0 keeps handles under the node face (see OS_QUAD_NODE_FACE). */
@@ -363,7 +377,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
 
   const hubRootRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (data.nodeType !== "hub") return;
     updateNodeInternals(id);
   }, [data.hubSides, data.nodeType, id, updateNodeInternals, w, h]);
@@ -584,22 +598,15 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         </div>
         {verts.map((v, i) => {
           const st = hubHandleStyle((v.x / bw) * 100, (v.y / bh) * 100);
+          const hp = hubHandleCardinalPosition(v, bw / 2, bh / 2);
           return (
             <span key={i} className="contents">
-              <Handle
-                type="target"
-                id={`hub-${i}-t`}
-                position={Position.Top}
-                className="!z-[2] !h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-                style={st}
-              />
-              <Handle
-                type="source"
-                id={`hub-${i}-s`}
-                position={Position.Top}
-                className="!z-[2] !h-2.5 !w-2.5 !border !border-zinc-500 !bg-zinc-800"
-                style={st}
-              />
+              <Handle type="target" id={`hub-${i}-t`} position={hp} className={QUAD_HANDLE_CLASS} style={st}>
+                <QuadHandleFace position={hp} />
+              </Handle>
+              <Handle type="source" id={`hub-${i}-s`} position={hp} className={QUAD_HANDLE_CLASS} style={st}>
+                <QuadHandleFace position={hp} />
+              </Handle>
             </span>
           );
         })}

@@ -125,9 +125,16 @@ export interface OpenSeerNodeData {
   [key: string]: unknown;
 }
 
+/** Stored edge routing (maps to React Flow edge `type` when rendering). */
+export type OpenSeerEdgeRouting = "straight" | "orthogonal" | "bezier";
+
 export interface OpenSeerEdgeData {
   label: string;
   relationshipType: string;
+  /** Path style; omitted means orthogonal. */
+  type?: OpenSeerEdgeRouting;
+  /** Reserved for future manual routing. */
+  controlPoints?: unknown[];
   [key: string]: unknown;
 }
 
