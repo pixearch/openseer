@@ -15,9 +15,6 @@ import {
   ReactFlow,
   ReactFlowProvider,
   SelectionMode,
-  getSimpleBezierPath,
-  getSmoothStepPath,
-  getStraightPath,
   useReactFlow,
   useStoreApi,
 } from "@xyflow/react";
@@ -35,6 +32,7 @@ import type {
   OnNodeDrag,
   SelectionDragHandler,
 } from "@xyflow/react";
+import { EdgeControlContext, OpenSeerFlowEdge } from "@/components/openseer/OpenSeerFlowEdge";
 import { GraphSidebar } from "@/components/openseer/GraphSidebar";
 import { ShowNodeTypeHeadingContext } from "@/components/openseer/graph-workspace-ui-context";
 import { InspectorPanel } from "@/components/openseer/InspectorPanel";
@@ -60,6 +58,13 @@ import {
   type AlignDirection,
 } from "@/lib/graph/multi-node-layout";
 import {
+  getBaselinePathD,
+  getOpenSeerEdgePathResult,
+  normalizeControlPoints,
+  sortControlPointsAlongPath,
+  snapFlowPosition,
+} from "@/lib/graph/edge-control-path";
+import {
   clampFrameChildrenEverywhere,
   clampFrameChildrenPositions,
   getViewGraph,
@@ -80,8 +85,8 @@ import {
 } from "@/lib/services/graph-storage";
 import { clampFixedMenuPosition } from "@/lib/ui/clamp-context-menu";
 import type {
+  OpenSeerControlPointType,
   OpenSeerEdgeData,
-  OpenSeerEdgeRouting,
   OpenSeerNodeData,
   OpenSeerNodeType,
 } from "@/lib/types/graph";
@@ -89,28 +94,19 @@ import { GRAPH_WORKSPACE_NODE_TYPE_LIST } from "@/lib/types/graph";
 
 const nodeTypes = { openSeer: OpenSeerNode };
 
+const edgeTypes = { openSeerEdge: OpenSeerFlowEdge };
+
 const defaultEdgeOptions = {
-  type: "smoothstep" as const,
+  type: "openSeerEdge" as const,
   markerEnd: { type: MarkerType.ArrowClosed, color: "#64748b", width: 18, height: 18 },
   style: { stroke: "#64748b", strokeWidth: 1.5 },
   selectable: true,
   interactionWidth: 24,
 };
 
-function routingToRfType(r: OpenSeerEdgeRouting | undefined): "straight" | "smoothstep" | "simplebezier" {
-  switch (r ?? "orthogonal") {
-    case "straight":
-      return "straight";
-    case "bezier":
-      return "simplebezier";
-    default:
-      return "smoothstep";
-  }
-}
-
 const CTX_MENU_W = 208;
 const CTX_MENU_H_NODES = 300;
-const CTX_MENU_H_EDGE = 168;
+const CTX_MENU_H_EDGE = 228;
 const STYLE_PANEL_W = 248;
 const STYLE_PANEL_H = 420;
 
@@ -189,6 +185,8 @@ type CtxMenu =
       kind: "edge";
       clientX: number;
       clientY: number;
+      flowX: number;
+      flowY: number;
       edgeId: string;
     };
 
@@ -225,6 +223,10 @@ function GraphWorkspaceInner() {
     edgeId: string | null;
     multiNodeIds: string[] | null;
   }>({ nodeId: null, edgeId: null, multiNodeIds: null });
+  const [selectedControlPoint, setSelectedControlPoint] = useState<{
+    edgeId: string;
+    pointId: string;
+  } | null>(null);
   const [textEditNodeId, setTextEditNodeId] = useState<string | null>(null);
   const [codeEditNodeId, setCodeEditNodeId] = useState<string | null>(null);
   const [overviewVisible, setOverviewVisible] = useState(true);
@@ -233,11 +235,29 @@ function GraphWorkspaceInner() {
   const [gridSnapEnabled, setGridSnapEnabled] = useState(false);
   const [alignOverlay, setAlignOverlay] = useState<null | "align" | "distribute">(null);
   const [proportionalMoveUi, setProportionalMoveUi] = useState(false);
+  const [controlPointGrab, setControlPointGrab] = useState<{
+    edgeId: string;
+    pointId: string;
+    originX: number;
+    originY: number;
+    anchorFlowX: number;
+    anchorFlowY: number;
+  } | null>(null);
 
   const selectionRef = useRef(selection);
   useLayoutEffect(() => {
     selectionRef.current = selection;
   }, [selection]);
+
+  const selectedControlPointRef = useRef(selectedControlPoint);
+  useLayoutEffect(() => {
+    selectedControlPointRef.current = selectedControlPoint;
+  }, [selectedControlPoint]);
+
+  const controlPointGrabRef = useRef(controlPointGrab);
+  useLayoutEffect(() => {
+    controlPointGrabRef.current = controlPointGrab;
+  }, [controlPointGrab]);
 
   const docRef = useRef(doc);
   useLayoutEffect(() => {
@@ -504,6 +524,69 @@ function GraphWorkspaceInner() {
 
       if (!graphPointerInside.current) return;
 
+      if (e.code === "KeyG") {
+        if (controlPointGrabRef.current) {
+          e.preventDefault();
+          return;
+        }
+        const cp = selectedControlPointRef.current;
+        if (!cp) return;
+        const d0 = docRef.current;
+        const path0 = groupPathRef.current;
+        const v0 = getViewGraph(d0.nodes, d0.edges, path0);
+        const ed0 = v0.edges.find((x) => x.id === cp.edgeId);
+        if (!ed0) return;
+        const pt0 = normalizeControlPoints(
+          (ed0.data as OpenSeerEdgeData | undefined)?.controlPoints
+        ).find((p) => p.id === cp.pointId);
+        if (!pt0) return;
+        e.preventDefault();
+        const { x: cx, y: cy } = lastGraphPointer.current;
+        const anchor = screenToFlowPosition({ x: cx, y: cy });
+        setControlPointGrab({
+          edgeId: cp.edgeId,
+          pointId: cp.pointId,
+          originX: pt0.x,
+          originY: pt0.y,
+          anchorFlowX: anchor.x,
+          anchorFlowY: anchor.y,
+        });
+        return;
+      }
+
+      if (e.code === "KeyP") {
+        const cp = selectedControlPointRef.current;
+        if (!cp) return;
+        e.preventDefault();
+        setDoc((doc) => {
+          const gPath = groupPathRef.current;
+          const v = getViewGraph(doc.nodes, doc.edges, gPath);
+          const ne = v.edges.map((edge) => {
+            if (edge.id !== cp.edgeId) return edge;
+            const data = (edge.data ?? {}) as OpenSeerEdgeData;
+            const pts = normalizeControlPoints(data.controlPoints).map((p) =>
+              p.id === cp.pointId
+                ? { ...p, type: p.type === "bezier" ? ("angled" as const) : ("bezier" as const) }
+                : p
+            );
+            const prev = (edge.data ?? {}) as Partial<OpenSeerEdgeData>;
+            const merged: OpenSeerEdgeData = {
+              ...prev,
+              label: prev.label ?? String(edge.label ?? "relates_to"),
+              relationshipType: prev.relationshipType ?? "relates_to",
+              controlPoints: pts,
+            };
+            return { ...edge, label: merged.label, data: merged };
+          });
+          if (gPath.length === 0) return { nodes: doc.nodes, edges: ne };
+          return {
+            nodes: patchNestedGraph(doc.nodes, gPath, v.nodes, ne),
+            edges: doc.edges,
+          };
+        });
+        return;
+      }
+
       if (k === "b") {
         if (e.repeat) return;
         const selId = selectionRef.current.nodeId;
@@ -624,7 +707,7 @@ function GraphWorkspaceInner() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ctxMenu, fitView, focusMode]);
+  }, [ctxMenu, fitView, focusMode, screenToFlowPosition]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -818,6 +901,10 @@ function GraphWorkspaceInner() {
       }
 
       setSelection(next);
+      setSelectedControlPoint((cp) => {
+        if (!cp) return null;
+        return next.edgeId === cp.edgeId ? cp : null;
+      });
     },
     []
   );
@@ -850,6 +937,9 @@ function GraphWorkspaceInner() {
         ? { nodeId: null, edgeId: null, multiNodeIds: null }
         : s
     );
+    setSelectedControlPoint((cp) =>
+      cp && deleted.some((e) => e.id === cp.edgeId) ? null : cp
+    );
   }, []);
 
   const flowNodes = useMemo(() => {
@@ -881,9 +971,6 @@ function GraphWorkspaceInner() {
       );
     });
     const base = list.map((e) => {
-      const data = e.data as OpenSeerEdgeData | undefined;
-      const routing = data?.type ?? "orthogonal";
-      const rfType = routingToRfType(routing);
       const insert = edgeInsertHoverId === e.id;
       const sel = e.selected === true;
       const hov = hoveredEdgeId === e.id && !sel;
@@ -902,7 +989,7 @@ function GraphWorkspaceInner() {
       }
       return {
         ...e,
-        type: rfType,
+        type: "openSeerEdge" as const,
         selectable: true,
         interactionWidth: 24,
         markerEnd: {
@@ -956,34 +1043,22 @@ function GraphWorkspaceInner() {
         });
         if (!pos) continue;
 
-        const rfType = edge.type ?? "smoothstep";
+        const edata = edge.data as OpenSeerEdgeData | undefined;
+        const routing = edata?.type ?? "orthogonal";
         const pathOpts = (edge as { pathOptions?: { offset?: number; stepPosition?: number } })
           .pathOptions;
-        let pathD: string;
-        if (rfType === "straight") {
-          [pathD] = getStraightPath({
-            sourceX: pos.sourceX,
-            sourceY: pos.sourceY,
-            targetX: pos.targetX,
-            targetY: pos.targetY,
-          });
-        } else if (rfType === "simplebezier") {
-          [pathD] = getSimpleBezierPath({
-            sourceX: pos.sourceX,
-            sourceY: pos.sourceY,
-            sourcePosition: pos.sourcePosition,
-            targetX: pos.targetX,
-            targetY: pos.targetY,
-            targetPosition: pos.targetPosition,
-          });
-        } else {
-          [pathD] = getSmoothStepPath({
-            ...pos,
-            borderRadius: undefined,
-            offset: pathOpts?.offset,
-            stepPosition: pathOpts?.stepPosition,
-          });
-        }
+        const cps = normalizeControlPoints(edata?.controlPoints);
+        const { path: pathD } = getOpenSeerEdgePathResult({
+          routing,
+          sourceX: pos.sourceX,
+          sourceY: pos.sourceY,
+          targetX: pos.targetX,
+          targetY: pos.targetY,
+          sourcePosition: pos.sourcePosition,
+          targetPosition: pos.targetPosition,
+          controlPoints: cps,
+          pathOptions: pathOpts,
+        });
         const dist = distancePointToSvgPath(flowPos.x, flowPos.y, pathD);
         if (dist < bestD) {
           bestD = dist;
@@ -1084,6 +1159,228 @@ function GraphWorkspaceInner() {
     [groupPath]
   );
 
+  const addControlPointAtFlow = useCallback(
+    (edgeId: string, flowX: number, flowY: number): string => {
+      const pointId = `cp-${crypto.randomUUID().slice(0, 8)}`;
+      const { nodeLookup, connectionMode } = store.getState();
+      const path = groupPathRef.current;
+      const d = docRef.current;
+      const v = getViewGraph(d.nodes, d.edges, path);
+      const edge = v.edges.find((e) => e.id === edgeId);
+      if (!edge) return pointId;
+      const sourceNode = nodeLookup.get(edge.source);
+      const targetNode = nodeLookup.get(edge.target);
+      if (!sourceNode || !targetNode) return pointId;
+      const pos = getEdgePosition({
+        id: edge.id,
+        sourceNode,
+        sourceHandle: edge.sourceHandle ?? null,
+        targetNode,
+        targetHandle: edge.targetHandle ?? null,
+        connectionMode,
+      });
+      if (!pos) return pointId;
+      const data = (edge.data ?? {}) as OpenSeerEdgeData;
+      const routing = data.type ?? "orthogonal";
+      const pathOpts = (edge as { pathOptions?: { offset?: number; stepPosition?: number } })
+        .pathOptions;
+      const baselineD = getBaselinePathD(
+        routing,
+        pos.sourceX,
+        pos.sourceY,
+        pos.targetX,
+        pos.targetY,
+        pos.sourcePosition,
+        pos.targetPosition,
+        pathOpts
+      );
+      const existing = normalizeControlPoints(data.controlPoints);
+      const snapped = snapFlowPosition(flowX, flowY, gridSnapEnabled, 20, 20);
+      const cpType: OpenSeerControlPointType = routing === "bezier" ? "bezier" : "angled";
+      const nextPt = { id: pointId, x: snapped.x, y: snapped.y, type: cpType };
+      const sorted = sortControlPointsAlongPath(baselineD, [...existing, nextPt]);
+
+      setDoc((doc) => {
+        const gPath = groupPathRef.current;
+        const v2 = getViewGraph(doc.nodes, doc.edges, gPath);
+        const ne = v2.edges.map((e) => {
+          if (e.id !== edgeId) return e;
+          const prev = (e.data ?? {}) as Partial<OpenSeerEdgeData>;
+          const merged: OpenSeerEdgeData = {
+            ...prev,
+            label: prev.label ?? String(e.label ?? "relates_to"),
+            relationshipType: prev.relationshipType ?? "relates_to",
+            controlPoints: sorted,
+          };
+          return { ...e, label: merged.label, data: merged };
+        });
+        if (gPath.length === 0) return { nodes: doc.nodes, edges: ne };
+        return {
+          nodes: patchNestedGraph(doc.nodes, gPath, v2.nodes, ne),
+          edges: doc.edges,
+        };
+      });
+      return pointId;
+    },
+    [store, gridSnapEnabled]
+  );
+
+  const updateControlPointPosition = useCallback(
+    (edgeId: string, pointId: string, flowX: number, flowY: number) => {
+      const { nodeLookup, connectionMode } = store.getState();
+      setDoc((doc) => {
+        const gPath = groupPathRef.current;
+        const v = getViewGraph(doc.nodes, doc.edges, gPath);
+        const ed = v.edges.find((e) => e.id === edgeId);
+        if (!ed) return doc;
+        const sourceNode = nodeLookup.get(ed.source);
+        const targetNode = nodeLookup.get(ed.target);
+        if (!sourceNode || !targetNode) return doc;
+        const pos = getEdgePosition({
+          id: ed.id,
+          sourceNode,
+          sourceHandle: ed.sourceHandle ?? null,
+          targetNode,
+          targetHandle: ed.targetHandle ?? null,
+          connectionMode,
+        });
+        if (!pos) return doc;
+        const data = (ed.data ?? {}) as OpenSeerEdgeData;
+        const routing = data.type ?? "orthogonal";
+        const pathOpts = (ed as { pathOptions?: { offset?: number; stepPosition?: number } })
+          .pathOptions;
+        const baselineD = getBaselinePathD(
+          routing,
+          pos.sourceX,
+          pos.sourceY,
+          pos.targetX,
+          pos.targetY,
+          pos.sourcePosition,
+          pos.targetPosition,
+          pathOpts
+        );
+        const list = sortControlPointsAlongPath(
+          baselineD,
+          normalizeControlPoints(data.controlPoints).map((p) =>
+            p.id === pointId ? { ...p, x: flowX, y: flowY } : p
+          )
+        );
+        const ne = v.edges.map((e) => {
+          if (e.id !== edgeId) return e;
+          const prev = (e.data ?? {}) as Partial<OpenSeerEdgeData>;
+          const merged: OpenSeerEdgeData = {
+            ...prev,
+            label: prev.label ?? String(e.label ?? "relates_to"),
+            relationshipType: prev.relationshipType ?? "relates_to",
+            controlPoints: list,
+          };
+          return { ...e, label: merged.label, data: merged };
+        });
+        if (gPath.length === 0) return { nodes: doc.nodes, edges: ne };
+        return {
+          nodes: patchNestedGraph(doc.nodes, gPath, v.nodes, ne),
+          edges: doc.edges,
+        };
+      });
+    },
+    [store]
+  );
+
+  useEffect(() => {
+    if (!controlPointGrab) return;
+    const { edgeId, pointId, originX, originY, anchorFlowX, anchorFlowY } = controlPointGrab;
+
+    const onMove = (ev: PointerEvent) => {
+      const fp = screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
+      const nx = originX + (fp.x - anchorFlowX);
+      const ny = originY + (fp.y - anchorFlowY);
+      const sn = snapFlowPosition(nx, ny, gridSnapEnabled, 20, 20);
+      updateControlPointPosition(edgeId, pointId, sn.x, sn.y);
+    };
+
+    const onPointerDown = (ev: PointerEvent) => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      setControlPointGrab(null);
+    };
+
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== "Escape") return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      updateControlPointPosition(edgeId, pointId, originX, originY);
+      setControlPointGrab(null);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [controlPointGrab, gridSnapEnabled, screenToFlowPosition, updateControlPointPosition]);
+
+  const onBeforeDelete = useCallback(
+    async ({
+      nodes,
+      edges,
+    }: {
+      nodes: Node<OpenSeerNodeData>[];
+      edges: Edge<OpenSeerEdgeData>[];
+    }) => {
+      const cp = selectedControlPointRef.current;
+      if (!cp || edges.length === 0) return { nodes, edges };
+      if (!edges.some((e) => e.id === cp.edgeId)) return { nodes, edges };
+      setDoc((doc) => {
+        const gPath = groupPathRef.current;
+        const v = getViewGraph(doc.nodes, doc.edges, gPath);
+        const ne = v.edges.map((e) => {
+          if (e.id !== cp.edgeId) return e;
+          const data = (e.data ?? {}) as OpenSeerEdgeData;
+          const nextPts = normalizeControlPoints(data.controlPoints).filter((p) => p.id !== cp.pointId);
+          const prev = (e.data ?? {}) as Partial<OpenSeerEdgeData>;
+          const merged: OpenSeerEdgeData = {
+            ...prev,
+            label: prev.label ?? String(e.label ?? "relates_to"),
+            relationshipType: prev.relationshipType ?? "relates_to",
+            controlPoints: nextPts,
+          };
+          return { ...e, label: merged.label, data: merged };
+        });
+        if (gPath.length === 0) return { nodes: doc.nodes, edges: ne };
+        return {
+          nodes: patchNestedGraph(doc.nodes, gPath, v.nodes, ne),
+          edges: doc.edges,
+        };
+      });
+      setSelectedControlPoint(null);
+      return { nodes, edges: edges.filter((e) => e.id !== cp.edgeId) };
+    },
+    []
+  );
+
+  const edgeControlApi = useMemo(
+    () => ({
+      snapToGrid: gridSnapEnabled,
+      snapGrid: [20, 20] as const,
+      screenToFlowPosition,
+      selectedControlPoint,
+      setSelectedControlPoint,
+      addControlPointAtFlow,
+      updateControlPointPosition,
+    }),
+    [
+      gridSnapEnabled,
+      screenToFlowPosition,
+      selectedControlPoint,
+      addControlPointAtFlow,
+      updateControlPointPosition,
+    ]
+  );
+
   const onDeleteNode = useCallback(
     (id: string) => {
       setTextEditNodeId((tid) => (tid === id ? null : tid));
@@ -1115,6 +1412,7 @@ function GraphWorkspaceInner() {
         };
       });
       setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
+      setSelectedControlPoint(null);
     },
     [groupPath]
   );
@@ -1140,6 +1438,7 @@ function GraphWorkspaceInner() {
     setGraphMeta({ id: SEED_GRAPH_ID, name: SEED_GRAPH_NAME });
     setGroupPath([]);
     setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
+    setSelectedControlPoint(null);
     initialFitDone.current = false;
     window.setTimeout(() => fitView({ padding: 0.12, maxZoom: 1.15, duration: 200 }), 60);
   }, [fitView]);
@@ -1150,6 +1449,7 @@ function GraphWorkspaceInner() {
     setGraphMeta({ id, name: "Untitled graph" });
     setGroupPath([]);
     setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
+    setSelectedControlPoint(null);
   }, []);
 
   const onAddNodeAt = useCallback(
@@ -1280,14 +1580,39 @@ function GraphWorkspaceInner() {
     []
   );
 
-  const onEdgeContextMenu: EdgeMouseHandler<Edge<OpenSeerEdgeData>> = useCallback((e, edge) => {
-    e.preventDefault();
-    setCtxMenu({
-      kind: "edge",
-      clientX: e.clientX,
-      clientY: e.clientY,
-      edgeId: edge.id,
-    });
+  const onEdgeContextMenu: EdgeMouseHandler<Edge<OpenSeerEdgeData>> = useCallback(
+    (e, edge) => {
+      e.preventDefault();
+      const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      setCtxMenu({
+        kind: "edge",
+        clientX: e.clientX,
+        clientY: e.clientY,
+        flowX: p.x,
+        flowY: p.y,
+        edgeId: edge.id,
+      });
+    },
+    [screenToFlowPosition]
+  );
+
+  const onEdgeDoubleClick: EdgeMouseHandler<Edge<OpenSeerEdgeData>> = useCallback(
+    (e, edge) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const pointId = addControlPointAtFlow(edge.id, p.x, p.y);
+      setSelectedControlPoint({ edgeId: edge.id, pointId });
+    },
+    [screenToFlowPosition, addControlPointAtFlow]
+  );
+
+  const onEdgeClick: EdgeMouseHandler<Edge<OpenSeerEdgeData>> = useCallback(() => {
+    setSelectedControlPoint(null);
+  }, []);
+
+  const onPaneClick = useCallback(() => {
+    setSelectedControlPoint(null);
   }, []);
 
   const onEdgeMouseEnter: EdgeMouseHandler<Edge<OpenSeerEdgeData>> = useCallback((_e, edge) => {
@@ -1543,6 +1868,7 @@ function GraphWorkspaceInner() {
         </div>
       ) : null}
       <ShowNodeTypeHeadingContext.Provider value={showNodeTypeHeadings}>
+        <EdgeControlContext.Provider value={edgeControlApi}>
         <ReactFlow
           className={`min-h-0 flex-1 bg-[#0c0c0e] ${groupPath.length > 0 && !focusMode ? "pt-0" : ""}`}
           minZoom={0.001}
@@ -1563,9 +1889,14 @@ function GraphWorkspaceInner() {
           onNodeDragStop={onNodeDragStop}
           onNodeDoubleClick={onNodeDoubleClick}
           onEdgeContextMenu={onEdgeContextMenu}
+          onEdgeDoubleClick={onEdgeDoubleClick}
+          onEdgeClick={onEdgeClick}
           onEdgeMouseEnter={onEdgeMouseEnter}
           onEdgeMouseLeave={onEdgeMouseLeave}
+          onPaneClick={onPaneClick}
+          onBeforeDelete={onBeforeDelete}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           defaultEdgeOptions={defaultEdgeOptions}
           elementsSelectable
           fitView
@@ -1607,6 +1938,7 @@ function GraphWorkspaceInner() {
             />
           ) : null}
         </ReactFlow>
+        </EdgeControlContext.Provider>
       </ShowNodeTypeHeadingContext.Provider>
       {proportionalMoveUi ? (
         <div className="pointer-events-none absolute bottom-20 left-1/2 z-[24] -translate-x-1/2 rounded-md border border-amber-600/80 bg-amber-950/95 px-3 py-1.5 text-center text-xs font-medium text-amber-100 shadow-lg">
@@ -1819,6 +2151,18 @@ function GraphWorkspaceInner() {
                 return { left, top };
               })()}
             >
+              <button
+                type="button"
+                className="block w-full px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                onClick={() => {
+                  if (ctxMenu.kind !== "edge") return;
+                  const pointId = addControlPointAtFlow(ctxMenu.edgeId, ctxMenu.flowX, ctxMenu.flowY);
+                  setSelectedControlPoint({ edgeId: ctxMenu.edgeId, pointId });
+                  setCtxMenu(null);
+                }}
+              >
+                Add Control Point
+              </button>
               <p className="px-3 py-1 text-[11px] font-medium uppercase text-zinc-500">Edge type</p>
               {(
                 [
