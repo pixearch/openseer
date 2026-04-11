@@ -121,12 +121,28 @@ export interface OpenSeerNodeData {
   /** Body fill opacity 0–1; only affects styleBodyColor */
   styleBodyOpacity?: number;
 
+  /** Header title text color (CSS color string) */
+  styleHeaderFontColor?: string;
+  /** Header title font size in CSS px */
+  styleHeaderFontSizePx?: number;
+  /** Header title stroke color (CSS color string); used with `styleHeaderStrokeWidthPx` */
+  styleHeaderStrokeColor?: string;
+  /** Header title stroke width in px */
+  styleHeaderStrokeWidthPx?: number;
+  /** Primary body / short description text color (CSS color string) */
+  styleBodyFontColor?: string;
+  /** Primary body / short description font size in CSS px */
+  styleBodyFontSizePx?: number;
+
   /** Satisfies React Flow node data constraint */
   [key: string]: unknown;
 }
 
 /** Stored edge routing (maps to React Flow edge `type` when rendering). */
 export type OpenSeerEdgeRouting = "straight" | "orthogonal" | "bezier";
+
+/** Arrow decoration; `both` reserved for future start+end arrows. */
+export type OpenSeerEdgeArrowStyle = "none" | "end" | "both";
 
 export type OpenSeerControlPointType = "angled" | "bezier";
 
@@ -137,6 +153,12 @@ export interface OpenSeerEdgeControlPoint {
   type: OpenSeerControlPointType;
 }
 
+/**
+ * Interior orthogonal bend vertices (flow space), excluding source/target.
+ * Each bend has a stable `id` for selection and editing; persisted on the edge.
+ */
+export type OpenSeerOrthogonalPathPoint = { x: number; y: number; id: string };
+
 export interface OpenSeerEdgeData {
   label: string;
   relationshipType: string;
@@ -144,6 +166,17 @@ export interface OpenSeerEdgeData {
   type?: OpenSeerEdgeRouting;
   /** Manual routing waypoints in flow coordinates. */
   controlPoints?: OpenSeerEdgeControlPoint[];
+  /**
+   * Ordered interior bends for orthogonal routing (flow space). Each point has a stable `id` for
+   * editing. Geometry uses this path; `controlPoints` stay empty once bends are stored here.
+   */
+  orthogonalPath?: OpenSeerOrthogonalPathPoint[];
+  /** Stroke color (CSS); default palette when omitted. */
+  strokeColor?: string;
+  /** Stroke width in CSS pixels / SVG user units. */
+  strokeWidthPx?: number;
+  /** Arrowheads; default `end`. */
+  arrowStyle?: OpenSeerEdgeArrowStyle;
   [key: string]: unknown;
 }
 

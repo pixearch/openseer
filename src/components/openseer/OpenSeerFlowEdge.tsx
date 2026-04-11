@@ -18,7 +18,14 @@ import {
   useState,
 } from "react";
 import type { OpenSeerEdgeData, OpenSeerEdgeRouting } from "@/lib/types/graph";
-import { getOpenSeerEdgePathResult, normalizeControlPoints, snapFlowPosition } from "@/lib/graph/edge-control-path";
+import {
+  canNudgeOrthogonalSegment,
+  getOpenSeerEdgePathResult,
+  getOrthogonalDisplayVertices,
+  normalizeControlPointsForRouting,
+  normalizeOrthogonalPath,
+  snapFlowPosition,
+} from "@/lib/graph/edge-control-path";
 
 export type SelectedControlPoint = { edgeId: string; pointId: string };
 
@@ -31,6 +38,16 @@ export type EdgeControlContextValue = {
   /** Inserts a control point (angled) at flow coordinates; returns the new point id. */
   addControlPointAtFlow: (edgeId: string, flowX: number, flowY: number) => string;
   updateControlPointPosition: (edgeId: string, pointId: string, flowX: number, flowY: number) => void;
+  hoveredEdgeId: string | null;
+  edgeAltInsertPreview: { edgeId: string; x: number; y: number } | null;
+  applyOrthogonalSegmentDrag: (
+    edgeId: string,
+    flowX: number,
+    flowY: number,
+    vertical: boolean,
+    delta: number,
+    fallbackSegmentIndex: number
+  ) => void;
 };
 
 export const EdgeControlContext = createContext<EdgeControlContextValue | null>(null);
@@ -80,7 +97,11 @@ function OpenSeerFlowEdgeInner(props: Props) {
   }, [draggingPointId]);
 
   const routing: OpenSeerEdgeRouting = data?.type ?? "orthogonal";
-  const controlPoints = useMemo(() => normalizeControlPoints(data?.controlPoints), [data?.controlPoints]);
+  const controlPoints = useMemo(
+    () => normalizeControlPointsForRouting(data?.controlPoints, routing),
+    [data?.controlPoints, routing]
+  );
+  const orthogonalPathStored = useMemo(() => normalizeOrthogonalPath(data?.orthogonalPath), [data?.orthogonalPath]);
 
   const { path, labelX, labelY } = useMemo(
     () =>
@@ -93,6 +114,7 @@ function OpenSeerFlowEdgeInner(props: Props) {
         sourcePosition,
         targetPosition,
         controlPoints,
+        orthogonalPath: orthogonalPathStored,
         pathOptions: pathOptions as { offset?: number; stepPosition?: number } | undefined,
       }),
     [
@@ -104,9 +126,44 @@ function OpenSeerFlowEdgeInner(props: Props) {
       sourcePosition,
       targetPosition,
       controlPoints,
+      orthogonalPathStored,
       pathOptions,
     ]
   );
+
+  const orthoVerts = useMemo(() => {
+    if (routing !== "orthogonal") return null;
+    return getOrthogonalDisplayVertices({
+      sourceX,
+      sourceY,
+      targetX,
+      targetY,
+      sourcePosition,
+      targetPosition,
+      pathOptions: pathOptions as { offset?: number; stepPosition?: number } | undefined,
+      orthogonalPath: orthogonalPathStored,
+      controlPoints,
+    });
+  }, [
+    routing,
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+    pathOptions,
+    orthogonalPathStored,
+    controlPoints,
+  ]);
+
+  const orthogonalBendHandles =
+    routing === "orthogonal" ? (orthogonalPathStored ?? []) : [];
+  const useLegacyControlPointHandles =
+    routing !== "orthogonal" || orthogonalBendHandles.length === 0;
+
+  const edgeHovered = ctx?.hoveredEdgeId === id && !selected;
+  const sw = Number(style && typeof style.strokeWidth === "number" ? style.strokeWidth : 1.5);
 
   const onAltPointerDownCapture = useCallback(
     (e: React.PointerEvent) => {
@@ -177,14 +234,57 @@ function OpenSeerFlowEdgeInner(props: Props) {
 
   const showHandles = selected === true;
 
+  const onSegmentPointerDown = useCallback(
+    (e: React.PointerEvent, segmentIndex: number, vertical: boolean) => {
+      if (!ctx) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const target = e.currentTarget as SVGLineElement;
+      target.setPointerCapture(e.pointerId);
+      let last = ctx.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const onMove = (ev: PointerEvent) => {
+        const cur = ctx.screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
+        const delta = vertical ? cur.x - last.x : cur.y - last.y;
+        last = cur;
+        if (delta !== 0)
+          ctx.applyOrthogonalSegmentDrag(id, cur.x, cur.y, vertical, delta, segmentIndex);
+      };
+      const onUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== e.pointerId) return;
+        target.releasePointerCapture(e.pointerId);
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    },
+    [ctx, id]
+  );
+
   const onHitPointerLeave = useCallback((pointId: string) => {
     if (dragRef.current?.pointId === pointId) return;
     setHoveredPointId((h) => (h === pointId ? null : h));
   }, []);
 
+  const altPreview =
+    ctx?.edgeAltInsertPreview?.edgeId === id ? ctx.edgeAltInsertPreview : null;
+
   return (
     <Fragment>
       <g className="nopan nodrag" onPointerDownCapture={onAltPointerDownCapture}>
+        {selected || edgeHovered ? (
+          <path
+            d={path}
+            fill="none"
+            stroke={selected ? "rgba(56, 189, 248, 0.42)" : "rgba(148, 163, 184, 0.32)"}
+            strokeWidth={sw + (selected ? 6 : 3.5)}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="react-flow__edge-path"
+          />
+        ) : null}
         <BaseEdge
           id={id}
           path={path}
@@ -201,7 +301,66 @@ function OpenSeerFlowEdgeInner(props: Props) {
           markerStart={props.markerStart}
           interactionWidth={interactionWidth}
         />
-        {showHandles
+        {selected && orthoVerts && orthoVerts.length >= 3
+          ? orthoVerts.slice(0, -1).map((va, i) => {
+              if (!canNudgeOrthogonalSegment(orthoVerts, i)) return null;
+              const vb = orthoVerts[i + 1];
+              const vertical = Math.abs(va.x - vb.x) < 1e-3;
+              return (
+                <line
+                  key={`os-seg-${i}`}
+                  x1={va.x}
+                  y1={va.y}
+                  x2={vb.x}
+                  y2={vb.y}
+                  stroke="transparent"
+                  strokeWidth={24}
+                  style={{
+                    pointerEvents: "stroke",
+                    cursor: vertical ? "ew-resize" : "ns-resize",
+                  }}
+                  onPointerDown={(ev) => onSegmentPointerDown(ev, i, vertical)}
+                />
+              );
+            })
+          : null}
+        {altPreview ? (
+          <g pointerEvents="none">
+            <circle
+              cx={altPreview.x}
+              cy={altPreview.y}
+              r={7}
+              fill="rgba(56, 189, 248, 0.15)"
+              stroke="#38bdf8"
+              strokeWidth={2}
+              strokeDasharray="4 3"
+            />
+          </g>
+        ) : null}
+        {showHandles && !useLegacyControlPointHandles
+          ? orthogonalBendHandles.map((bp) => {
+              const sel = ctx?.selectedControlPoint;
+              const isSel = sel?.edgeId === id && sel.pointId === bp.id;
+              const isHov = hoveredPointId === bp.id;
+              const stroke = isSel ? "#38bdf8" : isHov ? "#7dd3fc" : "#94a3b8";
+              const strokeW = isSel ? 2.2 : isHov ? 1.85 : 1.4;
+              const fill = "#0c0c0e";
+              return (
+                <g key={bp.id} className="nopan nodrag" pointerEvents="none">
+                  <rect
+                    x={bp.x - 5.5}
+                    y={bp.y - 5.5}
+                    width={11}
+                    height={11}
+                    fill={fill}
+                    stroke={stroke}
+                    strokeWidth={strokeW}
+                  />
+                </g>
+              );
+            })
+          : null}
+        {showHandles && useLegacyControlPointHandles
           ? controlPoints.map((cp) => {
               const sel = ctx?.selectedControlPoint;
               const isSel = sel?.edgeId === id && sel.pointId === cp.id;
@@ -232,7 +391,36 @@ function OpenSeerFlowEdgeInner(props: Props) {
             })
           : null}
       </g>
-      {showHandles && controlPoints.length > 0 ? (
+      {showHandles && !useLegacyControlPointHandles && orthogonalBendHandles.length > 0 ? (
+        <EdgeLabelRenderer>
+          {orthogonalBendHandles.map((bp) => {
+            const grabbing = draggingPointId === bp.id;
+            return (
+              <div
+                key={bp.id}
+                role="presentation"
+                className="nopan nodrag"
+                style={{
+                  position: "absolute",
+                  transform: `translate(-50%, -50%) translate(${bp.x}px,${bp.y}px)`,
+                  width: CONTROL_POINT_HIT_PX,
+                  height: CONTROL_POINT_HIT_PX,
+                  pointerEvents: "all",
+                  touchAction: "none",
+                  cursor: grabbing ? "grabbing" : "grab",
+                  borderRadius: 9999,
+                  background: "transparent",
+                }}
+                onPointerEnter={() => setHoveredPointId(bp.id)}
+                onPointerLeave={() => onHitPointerLeave(bp.id)}
+                onPointerDown={(ev) => onHandlePointerDown(ev, bp.id)}
+                onClick={(ev) => ev.stopPropagation()}
+              />
+            );
+          })}
+        </EdgeLabelRenderer>
+      ) : null}
+      {showHandles && useLegacyControlPointHandles && controlPoints.length > 0 ? (
         <EdgeLabelRenderer>
           {controlPoints.map((cp) => {
             const grabbing = draggingPointId === cp.id;
