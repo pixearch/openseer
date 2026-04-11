@@ -39,6 +39,11 @@ import {
   NODE_TYPE_ACCENT_CLASS,
   NODE_TYPE_LABEL,
 } from "@/lib/node-type-meta";
+import {
+  nodeHeaderContainerMinHeightPx,
+  resolveBodyTextStyle,
+  resolveHeaderTitleStyle,
+} from "@/lib/node-font-styles";
 import { getNodeChromeStyles } from "@/lib/node-style-chrome";
 import type { CodeBlockEntry, OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
 import { parseYoutubeVideoId, youtubeThumbnailUrl } from "@/lib/youtube";
@@ -594,7 +599,12 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
               {typeLabel}
             </span>
           ) : null}
-          <div className="mt-1 line-clamp-2 text-sm font-semibold text-zinc-100">{data.title}</div>
+          <div
+            className="mt-1 line-clamp-2 text-sm font-semibold text-zinc-100"
+            style={resolveHeaderTitleStyle(data)}
+          >
+            {data.title}
+          </div>
         </div>
         {verts.map((v, i) => {
           const st = hubHandleStyle((v.x / bw) * 100, (v.y / bh) * 100);
@@ -660,7 +670,10 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             ]
               .filter(Boolean)
               .join(" ")}
-            style={chrome.headerStyle}
+            style={{
+              ...chrome.headerStyle,
+              minHeight: nodeHeaderContainerMinHeightPx("compactToolbar", data, showTypeHeading),
+            }}
           >
             <div className="min-w-0 flex-1">
               {showTypeHeading ? (
@@ -668,7 +681,12 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
                   {typeLabel}
                 </span>
               ) : null}
-              <div className="truncate text-sm font-medium text-zinc-100">{data.title}</div>
+              <div
+                className="truncate text-sm font-medium text-zinc-100"
+                style={resolveHeaderTitleStyle(data)}
+              >
+                {data.title}
+              </div>
             </div>
             <button
               type="button"
@@ -864,7 +882,10 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             ]
               .filter(Boolean)
               .join(" ")}
-            style={chrome.headerStyle}
+            style={{
+              ...chrome.headerStyle,
+              minHeight: nodeHeaderContainerMinHeightPx("compactToolbar", data, showTypeHeading),
+            }}
           >
             <div className="min-w-0 flex-1">
               {showTypeHeading ? (
@@ -872,7 +893,12 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
                   {typeLabel}
                 </span>
               ) : null}
-              <div className="truncate text-sm font-medium text-zinc-100">{data.title}</div>
+              <div
+                className="truncate text-sm font-medium text-zinc-100"
+                style={resolveHeaderTitleStyle(data)}
+              >
+                {data.title}
+              </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
               <button
@@ -1067,7 +1093,10 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             ]
               .filter(Boolean)
               .join(" ")}
-            style={chrome.headerStyle}
+            style={{
+              ...chrome.headerStyle,
+              minHeight: nodeHeaderContainerMinHeightPx("compactToolbar", data, showTypeHeading),
+            }}
           >
             <div className="min-w-0 flex-1">
               {showTypeHeading ? (
@@ -1075,7 +1104,12 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
                   {typeLabel}
                 </span>
               ) : null}
-              <div className="truncate text-sm font-medium text-zinc-100">{data.title}</div>
+              <div
+                className="truncate text-sm font-medium text-zinc-100"
+                style={resolveHeaderTitleStyle(data)}
+              >
+                {data.title}
+              </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
               <button
@@ -1238,7 +1272,10 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           ]
             .filter(Boolean)
             .join(" ")}
-          style={chrome.headerStyle}
+          style={{
+            ...chrome.headerStyle,
+            minHeight: nodeHeaderContainerMinHeightPx("code", data, showTypeHeading),
+          }}
         >
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
@@ -1247,7 +1284,12 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
                   {typeLabel}
                 </span>
               ) : null}
-              <div className="truncate text-sm font-semibold text-zinc-100">{data.title}</div>
+              <div
+                className="truncate text-sm font-semibold text-zinc-100"
+                style={resolveHeaderTitleStyle(data)}
+              >
+                {data.title}
+              </div>
             </div>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
               <button
@@ -1290,6 +1332,7 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
                   patchBlocks(blocks.map((b) => (b.id === block.id ? { ...b, content } : b)))
                 }
                 className="min-h-[52px] min-w-0 flex-1 resize-y rounded border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-zinc-100 focus:border-emerald-700 focus:outline-none focus:ring-1 focus:ring-emerald-700"
+                style={resolveBodyTextStyle(data)}
               />
               <div className="flex shrink-0 flex-col gap-0.5">
                 <button
@@ -1354,7 +1397,10 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
         ]
           .filter(Boolean)
           .join(" ")}
-        style={chrome.headerStyle}
+        style={{
+          ...chrome.headerStyle,
+          minHeight: nodeHeaderContainerMinHeightPx("standardCard", data, showTypeHeading),
+        }}
       >
         <div
           className={[
@@ -1372,7 +1418,12 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             title={data.status}
           />
         </div>
-        <div className="mt-1 font-medium leading-snug text-zinc-100">{data.title}</div>
+        <div
+          className="mt-1 font-medium leading-snug text-zinc-100"
+          style={resolveHeaderTitleStyle(data)}
+        >
+          {data.title}
+        </div>
       </div>
       <div
         className={[
@@ -1417,11 +1468,14 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
                 ? "min-h-0 flex-1 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-zinc-400"
                 : "line-clamp-3 text-xs leading-relaxed text-zinc-400"
             }
+            style={resolveBodyTextStyle(data)}
           >
             {data.shortDescription}
           </p>
         ) : data.nodeType !== "evidence" || (!data.imageUrl && !data.videoUrl) ? (
-          <p className="text-xs italic text-zinc-600">No description</p>
+          <p className="text-xs italic text-zinc-600" style={resolveBodyTextStyle(data)}>
+            No description
+          </p>
         ) : null}
         {data.owner ? (
           <p className={`text-[11px] text-zinc-500${isTextNode ? " shrink-0" : ""}`}>

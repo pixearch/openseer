@@ -16,6 +16,7 @@ import {
   ReactFlowProvider,
   SelectionMode,
   useReactFlow,
+  useStore,
   useStoreApi,
 } from "@xyflow/react";
 import { getEdgePosition } from "@xyflow/system";
@@ -58,12 +59,29 @@ import {
   type AlignDirection,
 } from "@/lib/graph/multi-node-layout";
 import {
+  findOrthoSegmentIndexForPointer,
+  fullVerticesToOrthogonalPath,
   getBaselinePathD,
   getOpenSeerEdgePathResult,
+  getOrthogonalDisplayVertices,
+  getOrthogonalPolylineVertices,
+  insertOrthogonalBendOnDisplay,
+  migrateEdgeGeometryForRouting,
+  moveOrthogonalInteriorPoint,
   normalizeControlPoints,
+  normalizeControlPointsForRouting,
+  normalizeOrthogonalPath,
+  nudgeOrthogonalSegment,
+  orthogonalInteriorFromSegmentDragPolyline,
   sortControlPointsAlongPath,
   snapFlowPosition,
 } from "@/lib/graph/edge-control-path";
+import {
+  type AlignBounds,
+  boundsFromInternalNode,
+  collectAlignmentGuidesForBounds,
+  unionBoundsFromInternals,
+} from "@/lib/graph/alignment-guides";
 import {
   clampFrameChildrenEverywhere,
   clampFrameChildrenPositions,
@@ -87,8 +105,10 @@ import { clampFixedMenuPosition } from "@/lib/ui/clamp-context-menu";
 import type {
   OpenSeerControlPointType,
   OpenSeerEdgeData,
+  OpenSeerEdgeRouting,
   OpenSeerNodeData,
   OpenSeerNodeType,
+  OpenSeerOrthogonalPathPoint,
 } from "@/lib/types/graph";
 import { GRAPH_WORKSPACE_NODE_TYPE_LIST } from "@/lib/types/graph";
 
@@ -122,6 +142,41 @@ const LOCAL_SHOW_NODE_TYPE_HEADINGS_KEY = "openseer-show-node-type-headings-v1";
 
 /** Max distance (flow coordinates) from pointer to edge path to allow insert-on-drop. */
 const EDGE_INSERT_HIT_FLOW = 36;
+
+/** Max distance (flow) for Alt-hover control-point insert preview. */
+const EDGE_ALT_INSERT_HIT_FLOW = 30;
+
+function closestPointOnSvgPath(
+  flowX: number,
+  flowY: number,
+  pathD: string
+): { dist: number; x: number; y: number } | null {
+  if (typeof document === "undefined") return null;
+  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  p.setAttribute("d", pathD);
+  try {
+    const len = p.getTotalLength();
+    if (!Number.isFinite(len) || len <= 0) return null;
+    const steps = Math.min(80, Math.max(16, Math.ceil(len / 4)));
+    let best = Number.POSITIVE_INFINITY;
+    let bestX = 0;
+    let bestY = 0;
+    for (let i = 0; i <= steps; i++) {
+      const pt = p.getPointAtLength((len * i) / steps);
+      const dx = pt.x - flowX;
+      const dy = pt.y - flowY;
+      const d = Math.hypot(dx, dy);
+      if (d < best) {
+        best = d;
+        bestX = pt.x;
+        bestY = pt.y;
+      }
+    }
+    return { dist: best, x: bestX, y: bestY };
+  } catch {
+    return null;
+  }
+}
 
 function distancePointToSvgPath(flowX: number, flowY: number, pathD: string): number {
   if (typeof document === "undefined") return Number.POSITIVE_INFINITY;
@@ -166,6 +221,61 @@ function isVisibleOnCanvas(
   return visibleTypes.has(t);
 }
 
+type AlignmentGuidesState = { verticalXs: number[]; horizontalYs: number[] };
+
+function AlignmentGuidesOverlay({ guides }: { guides: AlignmentGuidesState | null }) {
+  const transform = useStore((s) => s.transform);
+  const width = useStore((s) => s.width);
+  const height = useStore((s) => s.height);
+  if (!guides || (guides.verticalXs.length === 0 && guides.horizontalYs.length === 0)) {
+    return null;
+  }
+  const [tx, ty, zoom] = transform;
+  const pad = 32;
+  const stroke = "rgba(56, 189, 248, 0.4)";
+  const h = height || 0;
+  const w = width || 0;
+  return (
+    <svg
+      className="pointer-events-none absolute inset-0 z-[5]"
+      width={width || "100%"}
+      height={height || "100%"}
+      aria-hidden
+    >
+      {guides.verticalXs.map((xf) => {
+        const x = xf * zoom + tx;
+        return (
+          <line
+            key={`v-${xf}`}
+            x1={x}
+            y1={-pad}
+            x2={x}
+            y2={h + pad}
+            stroke={stroke}
+            strokeWidth={1}
+            vectorEffect="nonScalingStroke"
+          />
+        );
+      })}
+      {guides.horizontalYs.map((yf) => {
+        const y = yf * zoom + ty;
+        return (
+          <line
+            key={`h-${yf}`}
+            x1={-pad}
+            y1={y}
+            x2={w + pad}
+            y2={y}
+            stroke={stroke}
+            strokeWidth={1}
+            vectorEffect="nonScalingStroke"
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
 type CtxMenu =
   | {
       kind: "pane";
@@ -197,10 +307,50 @@ type NodeStylePickerState = {
   position: { left: number; top: number };
 };
 
+/** `(Math.random() - 0.5) * 80` jitter like `onAddNodeAt`, plus a +40,+40 nudge from the source. */
+function nextDuplicateFlowPosition(origin: { x: number; y: number }): { x: number; y: number } {
+  return {
+    x: origin.x + 40 + (Math.random() - 0.5) * 80,
+    y: origin.y + 40 + (Math.random() - 0.5) * 80,
+  };
+}
+
+function remapNestedGraphNodeAndEdgeIds(ng: {
+  nodes: Node<OpenSeerNodeData>[];
+  edges: Edge<OpenSeerEdgeData>[];
+}): void {
+  for (const n of ng.nodes) {
+    if (n.data.nodeType === "group" && n.data.nestedGraph?.nodes?.length) {
+      remapNestedGraphNodeAndEdgeIds(
+        n.data.nestedGraph as {
+          nodes: Node<OpenSeerNodeData>[];
+          edges: Edge<OpenSeerEdgeData>[];
+        }
+      );
+    }
+  }
+  const idMap = new Map<string, string>();
+  for (const n of ng.nodes) {
+    idMap.set(n.id, `n-${crypto.randomUUID()}`);
+  }
+  ng.nodes = ng.nodes.map((n) => ({
+    ...n,
+    id: idMap.get(n.id)!,
+    parentId: n.parentId ? (idMap.get(n.parentId) ?? n.parentId) : undefined,
+  }));
+  ng.edges = ng.edges.map((e) => ({
+    ...e,
+    id: `e-${idMap.get(e.source)}-${idMap.get(e.target)}-${crypto.randomUUID().slice(0, 8)}`,
+    source: idMap.get(e.source)!,
+    target: idMap.get(e.target)!,
+  }));
+}
+
 function GraphWorkspaceInner() {
   const flowAreaRef = useRef<HTMLDivElement>(null);
   const graphPointerInside = useRef(false);
   const lastGraphPointer = useRef({ x: 0, y: 0 });
+  const lastGraphPointerFlow = useRef<{ x: number; y: number } | null>(null);
   const arrowPanStepRef = useRef(ARROW_PAN_STEP_DEFAULT);
   const { screenToFlowPosition, fitView, getNodes } = useReactFlow();
   const store = useStoreApi();
@@ -229,10 +379,13 @@ function GraphWorkspaceInner() {
   } | null>(null);
   const [textEditNodeId, setTextEditNodeId] = useState<string | null>(null);
   const [codeEditNodeId, setCodeEditNodeId] = useState<string | null>(null);
+  const textEditOpenRef = useRef(false);
+  const codeEditOpenRef = useRef(false);
   const [overviewVisible, setOverviewVisible] = useState(true);
   const [graphPanelCollapsed, setGraphPanelCollapsed] = useState(false);
   const [showNodeTypeHeadings, setShowNodeTypeHeadings] = useState(true);
   const [gridSnapEnabled, setGridSnapEnabled] = useState(false);
+  const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuidesState | null>(null);
   const [alignOverlay, setAlignOverlay] = useState<null | "align" | "distribute">(null);
   const [proportionalMoveUi, setProportionalMoveUi] = useState(false);
   const [controlPointGrab, setControlPointGrab] = useState<{
@@ -248,6 +401,14 @@ function GraphWorkspaceInner() {
   useLayoutEffect(() => {
     selectionRef.current = selection;
   }, [selection]);
+
+  useLayoutEffect(() => {
+    textEditOpenRef.current = textEditNodeId !== null;
+  }, [textEditNodeId]);
+
+  useLayoutEffect(() => {
+    codeEditOpenRef.current = codeEditNodeId !== null;
+  }, [codeEditNodeId]);
 
   const selectedControlPointRef = useRef(selectedControlPoint);
   useLayoutEffect(() => {
@@ -284,6 +445,11 @@ function GraphWorkspaceInner() {
   const edgeInsertHoverIdRef = useRef<string | null>(null);
   const [edgeInsertHoverId, setEdgeInsertHoverId] = useState<string | null>(null);
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
+  const [edgeAltInsertPreview, setEdgeAltInsertPreview] = useState<{
+    edgeId: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   const alignOverlayContainerRef = useRef<HTMLDivElement>(null);
 
@@ -291,6 +457,14 @@ function GraphWorkspaceInner() {
     if (!alignOverlay) return;
     alignOverlayContainerRef.current?.focus();
   }, [alignOverlay]);
+
+  useEffect(() => {
+    const onKeyUp = (ev: KeyboardEvent) => {
+      if (ev.key === "Alt") setEdgeAltInsertPreview(null);
+    };
+    window.addEventListener("keyup", onKeyUp);
+    return () => window.removeEventListener("keyup", onKeyUp);
+  }, []);
 
   const applyAlignOverlayChoice = useCallback((dir: AlignDirection, mode: "align" | "distribute") => {
     setAlignOverlay(null);
@@ -703,6 +877,68 @@ function GraphWorkspaceInner() {
           duration: 250,
           maxZoom: 2,
         });
+        return;
+      }
+
+      if (e.code === "KeyD" && e.ctrlKey && !e.metaKey) {
+        if (textEditOpenRef.current || codeEditOpenRef.current) return;
+        if (!graphPointerInside.current) return;
+        const sourceId =
+          selectionRef.current.nodeId ?? selectionRef.current.multiNodeIds?.[0] ?? null;
+        if (!sourceId) return;
+        e.preventDefault();
+        const exact = e.shiftKey;
+        setDoc((d) => {
+          const path = groupPathRef.current;
+          const v = getViewGraph(d.nodes, d.edges, path);
+          const source = v.nodes.find((n) => n.id === sourceId);
+          if (!source) return d;
+          const fp = lastGraphPointerFlow.current;
+          const dupPosition = fp
+            ? { x: fp.x, y: fp.y }
+            : nextDuplicateFlowPosition(source.position);
+          const newId = `n-${crypto.randomUUID()}`;
+          let nextNode: Node<OpenSeerNodeData>;
+          if (exact) {
+            const data = structuredClone(source.data) as OpenSeerNodeData;
+            if (data.nodeType === "group" && data.nestedGraph?.nodes?.length) {
+              remapNestedGraphNodeAndEdgeIds(
+                data.nestedGraph as {
+                  nodes: Node<OpenSeerNodeData>[];
+                  edges: Edge<OpenSeerEdgeData>[];
+                }
+              );
+            }
+            nextNode = {
+              ...source,
+              id: newId,
+              position: dupPosition,
+              selected: false,
+              data,
+            };
+          } else {
+            const nt = source.data.nodeType;
+            const isGroup = nt === "group";
+            nextNode = {
+              id: newId,
+              type: "openSeer" as const,
+              position: dupPosition,
+              data: createEmptyNodeData(nt),
+              width: isGroup ? GROUP_STANDARD_WIDTH : NODE_STANDARD_WIDTH,
+              height: isGroup ? GROUP_STANDARD_HEIGHT : NODE_STANDARD_HEIGHT,
+              ...(source.parentId !== undefined ? { parentId: source.parentId } : {}),
+              ...(source.extent !== undefined ? { extent: source.extent } : {}),
+              ...(source.zIndex !== undefined ? { zIndex: source.zIndex } : {}),
+            };
+          }
+          const nextNodes = [...v.nodes, nextNode];
+          const ordered = sortParentsBeforeChildren(nextNodes);
+          if (path.length === 0) return { nodes: ordered, edges: d.edges };
+          return {
+            nodes: patchNestedGraph(d.nodes, path, ordered, v.edges),
+            edges: d.edges,
+          };
+        });
       }
     };
     window.addEventListener("keydown", onKey);
@@ -971,33 +1207,62 @@ function GraphWorkspaceInner() {
       );
     });
     const base = list.map((e) => {
+      const edata = (e.data ?? {}) as OpenSeerEdgeData;
+      const customStroke =
+        typeof edata.strokeColor === "string" && edata.strokeColor.trim() !== ""
+          ? edata.strokeColor.trim()
+          : null;
+      const customW =
+        typeof edata.strokeWidthPx === "number" &&
+        Number.isFinite(edata.strokeWidthPx) &&
+        edata.strokeWidthPx > 0
+          ? edata.strokeWidthPx
+          : null;
+      const baseW = customW ?? 1.5;
+      let stroke = customStroke ?? "#64748b";
+      let strokeWidth = baseW;
+
       const insert = edgeInsertHoverId === e.id;
       const sel = e.selected === true;
       const hov = hoveredEdgeId === e.id && !sel;
-      const baseW = 1.5;
-      let stroke = "#64748b";
-      let strokeWidth = baseW;
       if (insert) {
         stroke = "#38bdf8";
         strokeWidth = baseW + 2;
       } else if (sel) {
-        stroke = "#38bdf8";
-        strokeWidth = 2.5;
+        strokeWidth = baseW + 2.5;
+        if (!customStroke) stroke = "#38bdf8";
       } else if (hov) {
-        stroke = "#94a3b8";
-        strokeWidth = 2;
+        strokeWidth = baseW + 1;
+        if (!customStroke) stroke = "#cbd5e1";
       }
+
+      const arrow = edata.arrowStyle;
+      const markerEnd =
+        arrow === "none"
+          ? undefined
+          : {
+              type: MarkerType.ArrowClosed,
+              color: stroke,
+              width: 18,
+              height: 18,
+            };
+      const markerStart =
+        arrow === "both"
+          ? {
+              type: MarkerType.ArrowClosed,
+              color: stroke,
+              width: 18,
+              height: 18,
+            }
+          : undefined;
+
       return {
         ...e,
         type: "openSeerEdge" as const,
         selectable: true,
         interactionWidth: 24,
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: stroke,
-          width: 18,
-          height: 18,
-        },
+        markerEnd,
+        markerStart,
         style: { ...e.style, stroke, strokeWidth },
         zIndex: insert ? 1000 : e.zIndex,
       };
@@ -1047,7 +1312,8 @@ function GraphWorkspaceInner() {
         const routing = edata?.type ?? "orthogonal";
         const pathOpts = (edge as { pathOptions?: { offset?: number; stepPosition?: number } })
           .pathOptions;
-        const cps = normalizeControlPoints(edata?.controlPoints);
+        const cps = normalizeControlPointsForRouting(edata?.controlPoints, routing);
+        const orthoPath = normalizeOrthogonalPath(edata?.orthogonalPath);
         const { path: pathD } = getOpenSeerEdgePathResult({
           routing,
           sourceX: pos.sourceX,
@@ -1057,6 +1323,7 @@ function GraphWorkspaceInner() {
           sourcePosition: pos.sourcePosition,
           targetPosition: pos.targetPosition,
           controlPoints: cps,
+          orthogonalPath: orthoPath,
           pathOptions: pathOpts,
         });
         const dist = distancePointToSvgPath(flowPos.x, flowPos.y, pathD);
@@ -1074,11 +1341,131 @@ function GraphWorkspaceInner() {
     [flowEdges, screenToFlowPosition, store]
   );
 
+  const updateEdgeAltInsertPreview = useCallback(
+    (e: PointerEvent) => {
+      if (!e.altKey) {
+        setEdgeAltInsertPreview(null);
+        return;
+      }
+
+      const flowPos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const { nodeLookup, connectionMode, transform } = store.getState();
+      const zoom = transform[2] || 1;
+      const threshold = EDGE_ALT_INSERT_HIT_FLOW / Math.max(zoom, 0.001);
+
+      const path = groupPathRef.current;
+      const d = docRef.current;
+      const v = getViewGraph(d.nodes, d.edges, path);
+      const byId = new Map(v.nodes.map((n) => [n.id, n]));
+
+      let best: { id: string; x: number; y: number; d: number } | null = null;
+
+      for (const edge of v.edges) {
+        const sView = byId.get(edge.source);
+        const tView = byId.get(edge.target);
+        if (
+          !sView ||
+          !tView ||
+          !isVisibleOnCanvas(sView, visibleTypes) ||
+          !isVisibleOnCanvas(tView, visibleTypes)
+        ) {
+          continue;
+        }
+
+        const sourceNode = nodeLookup.get(edge.source);
+        const targetNode = nodeLookup.get(edge.target);
+        if (!sourceNode || !targetNode) continue;
+
+        const pos = getEdgePosition({
+          id: edge.id,
+          sourceNode,
+          sourceHandle: edge.sourceHandle ?? null,
+          targetNode,
+          targetHandle: edge.targetHandle ?? null,
+          connectionMode,
+        });
+        if (!pos) continue;
+
+        const edata = edge.data as OpenSeerEdgeData | undefined;
+        const routing = edata?.type ?? "orthogonal";
+        const pathOpts = (edge as { pathOptions?: { offset?: number; stepPosition?: number } })
+          .pathOptions;
+        const cps = normalizeControlPointsForRouting(edata?.controlPoints, routing);
+        const orthoPath = normalizeOrthogonalPath(edata?.orthogonalPath);
+        const { path: pathD } = getOpenSeerEdgePathResult({
+          routing,
+          sourceX: pos.sourceX,
+          sourceY: pos.sourceY,
+          targetX: pos.targetX,
+          targetY: pos.targetY,
+          sourcePosition: pos.sourcePosition,
+          targetPosition: pos.targetPosition,
+          controlPoints: cps,
+          orthogonalPath: orthoPath,
+          pathOptions: pathOpts,
+        });
+
+        const hit = closestPointOnSvgPath(flowPos.x, flowPos.y, pathD);
+        if (hit && hit.dist < threshold) {
+          if (!best || hit.dist < best.d) {
+            best = { id: edge.id, x: hit.x, y: hit.y, d: hit.dist };
+          }
+        }
+      }
+
+      setEdgeAltInsertPreview((prev) => {
+        const next = best ? { edgeId: best.id, x: best.x, y: best.y } : null;
+        if (
+          prev?.edgeId === next?.edgeId &&
+          prev?.x === next?.x &&
+          prev?.y === next?.y
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    },
+    [screenToFlowPosition, store, visibleTypes]
+  );
+
+  const recomputeAlignmentGuides = useCallback(
+    (draggedBounds: AlignBounds | null, excludeIds: Set<string>) => {
+      if (!gridSnapEnabled || !draggedBounds) {
+        setAlignmentGuides(null);
+        return;
+      }
+      const { nodeLookup, transform } = store.getState();
+      const zoom = transform[2];
+      const tol = Math.max(0.25, 0.75 / zoom);
+      const others: AlignBounds[] = [];
+      for (const [, n] of nodeLookup) {
+        if (excludeIds.has(n.id)) continue;
+        if (!isVisibleOnCanvas(n.internals.userNode as Node<OpenSeerNodeData>, visibleTypes)) {
+          continue;
+        }
+        const b = boundsFromInternalNode(n);
+        if (b) others.push(b);
+      }
+      const g = collectAlignmentGuidesForBounds(draggedBounds, others, tol);
+      if (g.verticalXs.length === 0 && g.horizontalYs.length === 0) setAlignmentGuides(null);
+      else setAlignmentGuides(g);
+    },
+    [gridSnapEnabled, store, visibleTypes]
+  );
+
   const handleNodeDrag: OnNodeDrag<Node<OpenSeerNodeData>> = useCallback(
     (e, node) => {
       updateEdgeInsertHover(e, node.id);
+      if (!gridSnapEnabled) {
+        setAlignmentGuides(null);
+        return;
+      }
+      const dragged = store.getState().nodeLookup.get(node.id);
+      const db = dragged ? boundsFromInternalNode(dragged) : null;
+      const exclude = new Set(getNodes().filter((n) => n.selected).map((n) => n.id));
+      recomputeAlignmentGuides(db, exclude);
     },
-    [updateEdgeInsertHover]
+    [updateEdgeInsertHover, gridSnapEnabled, store, getNodes, recomputeAlignmentGuides]
   );
 
   const selectedNode = useMemo(
@@ -1137,6 +1524,7 @@ function GraphWorkspaceInner() {
   const onPatchEdge = useCallback(
     (id: string, next: OpenSeerEdgeData) => {
       setDoc((d) => {
+        const { nodeLookup, connectionMode } = store.getState();
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const ne = v.edges.map((e) => {
           if (e.id !== id) return e;
@@ -1147,6 +1535,38 @@ function GraphWorkspaceInner() {
             label: next.label ?? prev.label ?? String(e.label ?? "relates_to"),
             relationshipType: next.relationshipType ?? prev.relationshipType ?? "relates_to",
           };
+
+          const prevRouting = (prev.type ?? "orthogonal") as OpenSeerEdgeRouting;
+          const mergedRouting = (merged.type ?? "orthogonal") as OpenSeerEdgeRouting;
+          if (typeof next.type !== "undefined" && mergedRouting !== prevRouting) {
+            const sourceNode = nodeLookup.get(e.source);
+            const targetNode = nodeLookup.get(e.target);
+            if (sourceNode && targetNode) {
+              const pos = getEdgePosition({
+                id: e.id,
+                sourceNode,
+                sourceHandle: e.sourceHandle ?? null,
+                targetNode,
+                targetHandle: e.targetHandle ?? null,
+                connectionMode,
+              });
+              if (pos) {
+                const pathOpts = (e as { pathOptions?: { offset?: number; stepPosition?: number } })
+                  .pathOptions;
+                const geoPatch = migrateEdgeGeometryForRouting(
+                  mergedRouting,
+                  merged,
+                  {
+                    ...pos,
+                    pathOptions: pathOpts,
+                  },
+                  prevRouting
+                );
+                Object.assign(merged, geoPatch);
+              }
+            }
+          }
+
           return { ...e, label: merged.label, data: merged };
         });
         if (groupPath.length === 0) return { nodes: d.nodes, edges: ne };
@@ -1156,7 +1576,7 @@ function GraphWorkspaceInner() {
         };
       });
     },
-    [groupPath]
+    [groupPath, store]
   );
 
   const addControlPointAtFlow = useCallback(
@@ -1184,6 +1604,81 @@ function GraphWorkspaceInner() {
       const routing = data.type ?? "orthogonal";
       const pathOpts = (edge as { pathOptions?: { offset?: number; stepPosition?: number } })
         .pathOptions;
+      const snapped = snapFlowPosition(flowX, flowY, gridSnapEnabled, 20, 20);
+
+      if (routing === "orthogonal") {
+        const orthoPath = normalizeOrthogonalPath(data.orthogonalPath);
+        const cps = normalizeControlPoints(data.controlPoints);
+        let prevInterior: OpenSeerOrthogonalPathPoint[] =
+          orthoPath !== undefined && orthoPath.length > 0 ? orthoPath : [];
+        if (prevInterior.length === 0 && cps.length > 0) {
+          const verts = getOrthogonalPolylineVertices({
+            sourceX: pos.sourceX,
+            sourceY: pos.sourceY,
+            targetX: pos.targetX,
+            targetY: pos.targetY,
+            sourcePosition: pos.sourcePosition,
+            targetPosition: pos.targetPosition,
+            pathOptions: pathOpts,
+            orthogonalPath: undefined,
+            controlPoints: cps,
+          });
+          if (verts)
+            prevInterior = fullVerticesToOrthogonalPath(
+              verts,
+              [],
+              pos.sourcePosition,
+              pos.targetPosition
+            );
+        }
+        const display = getOrthogonalDisplayVertices({
+          sourceX: pos.sourceX,
+          sourceY: pos.sourceY,
+          targetX: pos.targetX,
+          targetY: pos.targetY,
+          sourcePosition: pos.sourcePosition,
+          targetPosition: pos.targetPosition,
+          pathOptions: pathOpts,
+          orthogonalPath: prevInterior.length > 0 ? prevInterior : undefined,
+          controlPoints: prevInterior.length > 0 ? [] : cps,
+        });
+        const nextInterior = insertOrthogonalBendOnDisplay(
+          display,
+          snapped.x,
+          snapped.y,
+          prevInterior,
+          pos.sourcePosition,
+          pos.targetPosition
+        );
+        if (nextInterior.length === 0) return pointId;
+        const prevIds = new Set(prevInterior.map((p) => p.id));
+        const newBend = nextInterior.find((p) => !prevIds.has(p.id));
+        const returnId = newBend?.id ?? pointId;
+
+        setDoc((doc) => {
+          const gPath = groupPathRef.current;
+          const v2 = getViewGraph(doc.nodes, doc.edges, gPath);
+          const ne = v2.edges.map((e) => {
+            if (e.id !== edgeId) return e;
+            const prev = (e.data ?? {}) as Partial<OpenSeerEdgeData>;
+            const merged: OpenSeerEdgeData = {
+              ...prev,
+              label: prev.label ?? String(e.label ?? "relates_to"),
+              relationshipType: prev.relationshipType ?? "relates_to",
+              orthogonalPath: nextInterior,
+              controlPoints: [],
+            };
+            return { ...e, label: merged.label, data: merged };
+          });
+          if (gPath.length === 0) return { nodes: doc.nodes, edges: ne };
+          return {
+            nodes: patchNestedGraph(doc.nodes, gPath, v2.nodes, ne),
+            edges: doc.edges,
+          };
+        });
+        return returnId;
+      }
+
       const baselineD = getBaselinePathD(
         routing,
         pos.sourceX,
@@ -1194,8 +1689,7 @@ function GraphWorkspaceInner() {
         pos.targetPosition,
         pathOpts
       );
-      const existing = normalizeControlPoints(data.controlPoints);
-      const snapped = snapFlowPosition(flowX, flowY, gridSnapEnabled, 20, 20);
+      const existing = normalizeControlPointsForRouting(data.controlPoints, routing);
       const cpType: OpenSeerControlPointType = routing === "bezier" ? "bezier" : "angled";
       const nextPt = { id: pointId, x: snapped.x, y: snapped.y, type: cpType };
       const sorted = sortControlPointsAlongPath(baselineD, [...existing, nextPt]);
@@ -1211,6 +1705,7 @@ function GraphWorkspaceInner() {
             label: prev.label ?? String(e.label ?? "relates_to"),
             relationshipType: prev.relationshipType ?? "relates_to",
             controlPoints: sorted,
+            orthogonalPath: undefined,
           };
           return { ...e, label: merged.label, data: merged };
         });
@@ -1249,6 +1744,77 @@ function GraphWorkspaceInner() {
         const routing = data.type ?? "orthogonal";
         const pathOpts = (ed as { pathOptions?: { offset?: number; stepPosition?: number } })
           .pathOptions;
+
+        if (routing === "orthogonal") {
+          const orthoPath = normalizeOrthogonalPath(data.orthogonalPath);
+          const cps = normalizeControlPoints(data.controlPoints);
+          let interior: OpenSeerOrthogonalPathPoint[] =
+            orthoPath !== undefined && orthoPath.length > 0 ? orthoPath : [];
+          if (interior.length === 0 && cps.length > 0) {
+            const verts = getOrthogonalPolylineVertices({
+              sourceX: pos.sourceX,
+              sourceY: pos.sourceY,
+              targetX: pos.targetX,
+              targetY: pos.targetY,
+              sourcePosition: pos.sourcePosition,
+              targetPosition: pos.targetPosition,
+              pathOptions: pathOpts,
+              orthogonalPath: undefined,
+              controlPoints: cps,
+            });
+            if (verts)
+              interior = fullVerticesToOrthogonalPath(
+                verts,
+                [],
+                pos.sourcePosition,
+                pos.targetPosition
+              );
+            const cp = cps.find((p) => p.id === pointId);
+            if (cp && interior.length > 0) {
+              let bestI = 0;
+              let bestD = Number.POSITIVE_INFINITY;
+              for (let i = 0; i < interior.length; i++) {
+                const d0 = Math.hypot(interior[i].x - cp.x, interior[i].y - cp.y);
+                if (d0 < bestD) {
+                  bestD = d0;
+                  bestI = i;
+                }
+              }
+              interior = interior.map((p, i) => (i === bestI ? { ...p, id: pointId } : p));
+            }
+          }
+          if (!interior.some((p) => p.id === pointId)) return doc;
+          const nextInterior = moveOrthogonalInteriorPoint(
+            pos.sourceX,
+            pos.sourceY,
+            pos.targetX,
+            pos.targetY,
+            interior,
+            pointId,
+            flowX,
+            flowY,
+            pos.sourcePosition,
+            pos.targetPosition
+          );
+          const ne = v.edges.map((e) => {
+            if (e.id !== edgeId) return e;
+            const prev = (e.data ?? {}) as Partial<OpenSeerEdgeData>;
+            const merged: OpenSeerEdgeData = {
+              ...prev,
+              label: prev.label ?? String(e.label ?? "relates_to"),
+              relationshipType: prev.relationshipType ?? "relates_to",
+              orthogonalPath: nextInterior,
+              controlPoints: [],
+            };
+            return { ...e, label: merged.label, data: merged };
+          });
+          if (gPath.length === 0) return { nodes: doc.nodes, edges: ne };
+          return {
+            nodes: patchNestedGraph(doc.nodes, gPath, v.nodes, ne),
+            edges: doc.edges,
+          };
+        }
+
         const baselineD = getBaselinePathD(
           routing,
           pos.sourceX,
@@ -1261,7 +1827,7 @@ function GraphWorkspaceInner() {
         );
         const list = sortControlPointsAlongPath(
           baselineD,
-          normalizeControlPoints(data.controlPoints).map((p) =>
+          normalizeControlPointsForRouting(data.controlPoints, routing).map((p) =>
             p.id === pointId ? { ...p, x: flowX, y: flowY } : p
           )
         );
@@ -1273,6 +1839,7 @@ function GraphWorkspaceInner() {
             label: prev.label ?? String(e.label ?? "relates_to"),
             relationshipType: prev.relationshipType ?? "relates_to",
             controlPoints: list,
+            orthogonalPath: undefined,
           };
           return { ...e, label: merged.label, data: merged };
         });
@@ -1284,6 +1851,113 @@ function GraphWorkspaceInner() {
       });
     },
     [store]
+  );
+
+  const applyOrthogonalSegmentDrag = useCallback(
+    (
+      edgeId: string,
+      flowX: number,
+      flowY: number,
+      vertical: boolean,
+      delta: number,
+      fallbackSegmentIndex: number
+    ) => {
+      const { nodeLookup, connectionMode } = store.getState();
+      setDoc((doc) => {
+        const gPath = groupPathRef.current;
+        const v = getViewGraph(doc.nodes, doc.edges, gPath);
+        const ed = v.edges.find((e) => e.id === edgeId);
+        if (!ed) return doc;
+        const data = (ed.data ?? {}) as OpenSeerEdgeData;
+        if ((data.type ?? "orthogonal") !== "orthogonal") return doc;
+
+        const sourceNode = nodeLookup.get(ed.source);
+        const targetNode = nodeLookup.get(ed.target);
+        if (!sourceNode || !targetNode) return doc;
+        const pos = getEdgePosition({
+          id: ed.id,
+          sourceNode,
+          sourceHandle: ed.sourceHandle ?? null,
+          targetNode,
+          targetHandle: ed.targetHandle ?? null,
+          connectionMode,
+        });
+        if (!pos) return doc;
+
+        const pathOpts = (ed as { pathOptions?: { offset?: number; stepPosition?: number } })
+          .pathOptions;
+        const cps = normalizeControlPoints(data.controlPoints);
+        let orthoStored = normalizeOrthogonalPath(data.orthogonalPath) ?? [];
+        if (orthoStored.length === 0 && cps.length > 0) {
+          const v0 = getOrthogonalPolylineVertices({
+            sourceX: pos.sourceX,
+            sourceY: pos.sourceY,
+            targetX: pos.targetX,
+            targetY: pos.targetY,
+            sourcePosition: pos.sourcePosition,
+            targetPosition: pos.targetPosition,
+            pathOptions: pathOpts,
+            orthogonalPath: undefined,
+            controlPoints: cps,
+          });
+          if (v0)
+            orthoStored = fullVerticesToOrthogonalPath(
+              v0,
+              [],
+              pos.sourcePosition,
+              pos.targetPosition
+            );
+        }
+        const verts = getOrthogonalDisplayVertices({
+          sourceX: pos.sourceX,
+          sourceY: pos.sourceY,
+          targetX: pos.targetX,
+          targetY: pos.targetY,
+          sourcePosition: pos.sourcePosition,
+          targetPosition: pos.targetPosition,
+          pathOptions: pathOpts,
+          orthogonalPath: orthoStored.length > 0 ? orthoStored : undefined,
+          controlPoints: orthoStored.length > 0 ? [] : cps,
+        });
+
+        const segmentIndex = findOrthoSegmentIndexForPointer(
+          verts,
+          flowX,
+          flowY,
+          vertical,
+          fallbackSegmentIndex
+        );
+        const nudged = nudgeOrthogonalSegment(verts, segmentIndex, delta);
+        if (!nudged) return doc;
+
+        const interior = orthogonalInteriorFromSegmentDragPolyline(nudged, orthoStored);
+        const snapped = gridSnapEnabled
+          ? interior.map((p) => {
+              const s = snapFlowPosition(p.x, p.y, true, 20, 20);
+              return { ...p, x: s.x, y: s.y };
+            })
+          : interior;
+
+        const ne = v.edges.map((e) => {
+          if (e.id !== edgeId) return e;
+          const prev = (e.data ?? {}) as Partial<OpenSeerEdgeData>;
+          const merged: OpenSeerEdgeData = {
+            ...prev,
+            label: prev.label ?? String(e.label ?? "relates_to"),
+            relationshipType: prev.relationshipType ?? "relates_to",
+            orthogonalPath: snapped,
+            controlPoints: [],
+          };
+          return { ...e, label: merged.label, data: merged };
+        });
+        if (gPath.length === 0) return { nodes: doc.nodes, edges: ne };
+        return {
+          nodes: patchNestedGraph(doc.nodes, gPath, v.nodes, ne),
+          edges: doc.edges,
+        };
+      });
+    },
+    [store, gridSnapEnabled]
   );
 
   useEffect(() => {
@@ -1340,6 +2014,12 @@ function GraphWorkspaceInner() {
         const ne = v.edges.map((e) => {
           if (e.id !== cp.edgeId) return e;
           const data = (e.data ?? {}) as OpenSeerEdgeData;
+          const routing = data.type ?? "orthogonal";
+          const ortho = normalizeOrthogonalPath(data.orthogonalPath);
+          const filteredOrtho =
+            routing === "orthogonal" && ortho !== undefined && ortho.length > 0
+              ? ortho.filter((p) => p.id !== cp.pointId)
+              : null;
           const nextPts = normalizeControlPoints(data.controlPoints).filter((p) => p.id !== cp.pointId);
           const prev = (e.data ?? {}) as Partial<OpenSeerEdgeData>;
           const merged: OpenSeerEdgeData = {
@@ -1347,6 +2027,12 @@ function GraphWorkspaceInner() {
             label: prev.label ?? String(e.label ?? "relates_to"),
             relationshipType: prev.relationshipType ?? "relates_to",
             controlPoints: nextPts,
+            ...(filteredOrtho !== null
+              ? {
+                  orthogonalPath:
+                    filteredOrtho.length > 0 ? filteredOrtho : undefined,
+                }
+              : {}),
           };
           return { ...e, label: merged.label, data: merged };
         });
@@ -1371,6 +2057,9 @@ function GraphWorkspaceInner() {
       setSelectedControlPoint,
       addControlPointAtFlow,
       updateControlPointPosition,
+      hoveredEdgeId,
+      edgeAltInsertPreview,
+      applyOrthogonalSegmentDrag,
     }),
     [
       gridSnapEnabled,
@@ -1378,6 +2067,9 @@ function GraphWorkspaceInner() {
       selectedControlPoint,
       addControlPointAtFlow,
       updateControlPointPosition,
+      hoveredEdgeId,
+      edgeAltInsertPreview,
+      applyOrthogonalSegmentDrag,
     ]
   );
 
@@ -1613,6 +2305,7 @@ function GraphWorkspaceInner() {
 
   const onPaneClick = useCallback(() => {
     setSelectedControlPoint(null);
+    setEdgeAltInsertPreview(null);
   }, []);
 
   const onEdgeMouseEnter: EdgeMouseHandler<Edge<OpenSeerEdgeData>> = useCallback((_e, edge) => {
@@ -1637,6 +2330,7 @@ function GraphWorkspaceInner() {
   }, []);
 
   const onNodeDragStop: OnNodeDrag<Node<OpenSeerNodeData>> = useCallback((_e, node) => {
+    setAlignmentGuides(null);
     proportionalDragLeaderRef.current = null;
 
     const hoverId = edgeInsertHoverIdRef.current;
@@ -1707,12 +2401,30 @@ function GraphWorkspaceInner() {
   );
 
   const onSelectionDragStop: SelectionDragHandler<Node<OpenSeerNodeData>> = useCallback(() => {
+    setAlignmentGuides(null);
     proportionalDragLeaderRef.current = null;
     edgeInsertHoverIdRef.current = null;
     setEdgeInsertHoverId(null);
     edgeInsertEligibleRef.current = false;
     edgeInsertGrabNodeIdRef.current = null;
   }, []);
+
+  const onSelectionDrag: SelectionDragHandler<Node<OpenSeerNodeData>> = useCallback(
+    (_e, nodes) => {
+      if (!gridSnapEnabled || nodes.length === 0) {
+        setAlignmentGuides(null);
+        return;
+      }
+      const { nodeLookup } = store.getState();
+      const internals = nodes
+        .map((n) => nodeLookup.get(n.id))
+        .filter((n): n is NonNullable<typeof n> => n !== undefined);
+      const db = unionBoundsFromInternals(internals);
+      const exclude = new Set(nodes.map((n) => n.id));
+      recomputeAlignmentGuides(db, exclude);
+    },
+    [gridSnapEnabled, store, recomputeAlignmentGuides]
+  );
 
   const onNodeDoubleClick: NodeMouseHandler = useCallback((_e, node) => {
     if (node.data.nodeType === "group") {
@@ -1804,15 +2516,22 @@ function GraphWorkspaceInner() {
       className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[#0c0c0e]"
       onContextMenuCapture={onFlowContextMenuCapture}
       onContextMenu={onFlowContextMenu}
-      onPointerEnter={() => {
+      onPointerEnter={(e) => {
         graphPointerInside.current = true;
+        lastGraphPointer.current = { x: e.clientX, y: e.clientY };
+        const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        lastGraphPointerFlow.current = { x: p.x, y: p.y };
       }}
       onPointerLeave={() => {
         graphPointerInside.current = false;
+        lastGraphPointerFlow.current = null;
       }}
       onPointerMove={(e) => {
         graphPointerInside.current = true;
         lastGraphPointer.current = { x: e.clientX, y: e.clientY };
+        const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        lastGraphPointerFlow.current = { x: p.x, y: p.y };
+        updateEdgeAltInsertPreview(e.nativeEvent);
       }}
     >
       {focusMode ? (
@@ -1882,6 +2601,7 @@ function GraphWorkspaceInner() {
           onSelectionChange={onSelectionChange}
           onSelectionContextMenu={onSelectionContextMenu}
           onSelectionDragStart={onSelectionDragStart}
+          onSelectionDrag={onSelectionDrag}
           onSelectionDragStop={onSelectionDragStop}
           onNodeContextMenu={onNodeContextMenu}
           onNodeDrag={handleNodeDrag}
@@ -1908,6 +2628,7 @@ function GraphWorkspaceInner() {
           multiSelectionKeyCode="Shift"
           snapToGrid={gridSnapEnabled}
           snapGrid={[20, 20]}
+          elevateEdgesOnSelect={false}
         >
           <Background
             id="os-grid"
@@ -1916,6 +2637,7 @@ function GraphWorkspaceInner() {
             size={1}
             color="#27272a"
           />
+          <AlignmentGuidesOverlay guides={alignmentGuides} />
           <Controls
             className="!m-3 !border !border-zinc-700 !bg-zinc-900/95 !shadow-lg [&_button]:!border-zinc-700 [&_button]:!bg-zinc-900 [&_button]:!text-zinc-200 [&_button:hover]:!bg-zinc-800"
             showInteractive={false}

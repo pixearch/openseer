@@ -7,10 +7,13 @@ import { useDebouncedPatchNode } from "@/hooks/use-debounced-graph-patch";
 import { copyAllCodeBlocks, newCodeBlockId, normalizeCodeBlocksForDisplay } from "@/lib/code-blocks";
 import { DEFAULT_TITLE_BY_TYPE } from "@/lib/node-type-meta";
 import { parseYoutubeVideoId } from "@/lib/youtube";
+import { colorInputHex6 } from "@/lib/node-font-styles";
 import type {
+  OpenSeerEdgeArrowStyle,
   OpenSeerEdgeData,
   OpenSeerEdgeRouting,
   OpenSeerNodeData,
+  OpenSeerNodeType,
 } from "@/lib/types/graph";
 import { OPEN_SEER_STATUSES } from "@/lib/types/graph";
 
@@ -35,6 +38,248 @@ const inputClass =
   "w-full rounded border border-zinc-700 bg-zinc-900/80 px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-sky-600 focus:outline-none focus:ring-1 focus:ring-sky-600";
 
 const textareaClass = `${inputClass} min-h-[72px] resize-y font-mono text-xs leading-relaxed`;
+
+function inspectorShowsBodyTypography(nt: OpenSeerNodeType): boolean {
+  return nt !== "hub" && nt !== "image" && nt !== "video" && nt !== "document";
+}
+
+function InspectorNodeTypographySection({
+  draft,
+  patchImmediate,
+}: {
+  draft: OpenSeerNodeData;
+  patchImmediate: (patch: Partial<OpenSeerNodeData>) => void;
+}) {
+  const showBody = inspectorShowsBodyTypography(draft.nodeType);
+  const defaultHeaderSliderFs =
+    draft.nodeType === "code" ||
+    draft.nodeType === "image" ||
+    draft.nodeType === "video" ||
+    draft.nodeType === "document"
+      ? 14
+      : 16;
+  const headerSliderValue = draft.styleHeaderFontSizePx ?? defaultHeaderSliderFs;
+  const bodySliderValue = draft.styleBodyFontSizePx ?? 12;
+  const hColorHex = colorInputHex6(draft.styleHeaderFontColor, "#fafafa");
+  const hStrokeHex = colorInputHex6(draft.styleHeaderStrokeColor, "#18181b");
+  const bColorHex = colorInputHex6(draft.styleBodyFontColor, "#a1a1aa");
+  const strokeW =
+    typeof draft.styleHeaderStrokeWidthPx === "number" &&
+    Number.isFinite(draft.styleHeaderStrokeWidthPx)
+      ? draft.styleHeaderStrokeWidthPx
+      : 0;
+
+  return (
+    <>
+      <hr className="border-zinc-800" />
+      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Header typography</p>
+      <Field label="Header font color">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="color"
+            aria-label="Header font color"
+            className="h-9 w-14 shrink-0 cursor-pointer rounded border border-zinc-700 bg-zinc-900 p-0.5"
+            value={hColorHex}
+            onChange={(e) => patchImmediate({ styleHeaderFontColor: e.target.value })}
+          />
+          <input
+            className={`${inputClass} min-w-[8rem] flex-1 font-mono text-xs`}
+            value={typeof draft.styleHeaderFontColor === "string" ? draft.styleHeaderFontColor : ""}
+            placeholder="#fafafa or hsl(…)"
+            onChange={(e) =>
+              patchImmediate({
+                styleHeaderFontColor:
+                  e.target.value.trim() === "" ? undefined : e.target.value.trim(),
+              })
+            }
+          />
+          <button
+            type="button"
+            className="shrink-0 rounded border border-zinc-600 px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800"
+            onClick={() => patchImmediate({ styleHeaderFontColor: undefined })}
+          >
+            Default
+          </button>
+        </div>
+      </Field>
+      <Field label="Header font size">
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={10}
+            max={32}
+            step={1}
+            className="min-w-0 flex-1 accent-sky-500"
+            value={headerSliderValue}
+            onChange={(e) => patchImmediate({ styleHeaderFontSizePx: Number(e.target.value) })}
+          />
+          <input
+            className="w-14 rounded border border-zinc-700 bg-zinc-900/80 px-1.5 py-1 text-right text-xs tabular-nums text-zinc-100"
+            type="number"
+            min={8}
+            max={40}
+            step={1}
+            value={draft.styleHeaderFontSizePx ?? ""}
+            placeholder="def."
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === "") {
+                patchImmediate({ styleHeaderFontSizePx: undefined });
+                return;
+              }
+              const v = Number(raw);
+              if (!Number.isFinite(v) || v <= 0) return;
+              patchImmediate({ styleHeaderFontSizePx: v });
+            }}
+          />
+          <button
+            type="button"
+            className="shrink-0 rounded border border-zinc-600 px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800"
+            onClick={() => patchImmediate({ styleHeaderFontSizePx: undefined })}
+          >
+            Default
+          </button>
+        </div>
+      </Field>
+      <Field label="Header stroke color">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="color"
+            aria-label="Header stroke color"
+            className="h-9 w-14 shrink-0 cursor-pointer rounded border border-zinc-700 bg-zinc-900 p-0.5"
+            value={hStrokeHex}
+            onChange={(e) => patchImmediate({ styleHeaderStrokeColor: e.target.value })}
+          />
+          <input
+            className={`${inputClass} min-w-[8rem] flex-1 font-mono text-xs`}
+            value={typeof draft.styleHeaderStrokeColor === "string" ? draft.styleHeaderStrokeColor : ""}
+            placeholder="#18181b or hsl(…)"
+            onChange={(e) =>
+              patchImmediate({
+                styleHeaderStrokeColor:
+                  e.target.value.trim() === "" ? undefined : e.target.value.trim(),
+              })
+            }
+          />
+          <button
+            type="button"
+            className="shrink-0 rounded border border-zinc-600 px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800"
+            onClick={() => patchImmediate({ styleHeaderStrokeColor: undefined })}
+          >
+            Default
+          </button>
+        </div>
+      </Field>
+      <Field label="Header stroke thickness">
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={0}
+            max={4}
+            step={0.25}
+            className="min-w-0 flex-1 accent-sky-500"
+            value={strokeW}
+            onChange={(e) => patchImmediate({ styleHeaderStrokeWidthPx: Number(e.target.value) })}
+          />
+          <input
+            className="w-14 rounded border border-zinc-700 bg-zinc-900/80 px-1.5 py-1 text-right text-xs tabular-nums text-zinc-100"
+            type="number"
+            min={0}
+            max={8}
+            step={0.25}
+            value={strokeW}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (!Number.isFinite(v) || v < 0) return;
+              patchImmediate({ styleHeaderStrokeWidthPx: v });
+            }}
+          />
+          <button
+            type="button"
+            className="shrink-0 rounded border border-zinc-600 px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800"
+            onClick={() => patchImmediate({ styleHeaderStrokeWidthPx: undefined })}
+          >
+            Default
+          </button>
+        </div>
+      </Field>
+      {showBody ? (
+        <>
+          <hr className="border-zinc-800" />
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Body / text typography</p>
+          <Field label="Text font color">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="color"
+                aria-label="Text font color"
+                className="h-9 w-14 shrink-0 cursor-pointer rounded border border-zinc-700 bg-zinc-900 p-0.5"
+                value={bColorHex}
+                onChange={(e) => patchImmediate({ styleBodyFontColor: e.target.value })}
+              />
+              <input
+                className={`${inputClass} min-w-[8rem] flex-1 font-mono text-xs`}
+                value={typeof draft.styleBodyFontColor === "string" ? draft.styleBodyFontColor : ""}
+                placeholder="#a1a1aa or hsl(…)"
+                onChange={(e) =>
+                  patchImmediate({
+                    styleBodyFontColor:
+                      e.target.value.trim() === "" ? undefined : e.target.value.trim(),
+                  })
+                }
+              />
+              <button
+                type="button"
+                className="shrink-0 rounded border border-zinc-600 px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800"
+                onClick={() => patchImmediate({ styleBodyFontColor: undefined })}
+              >
+                Default
+              </button>
+            </div>
+          </Field>
+          <Field label="Text font size">
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={9}
+                max={22}
+                step={1}
+                className="min-w-0 flex-1 accent-sky-500"
+                value={bodySliderValue}
+                onChange={(e) => patchImmediate({ styleBodyFontSizePx: Number(e.target.value) })}
+              />
+              <input
+                className="w-14 rounded border border-zinc-700 bg-zinc-900/80 px-1.5 py-1 text-right text-xs tabular-nums text-zinc-100"
+                type="number"
+                min={8}
+                max={28}
+                step={1}
+                value={draft.styleBodyFontSizePx ?? ""}
+                placeholder="def."
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === "") {
+                    patchImmediate({ styleBodyFontSizePx: undefined });
+                    return;
+                  }
+                  const v = Number(raw);
+                  if (!Number.isFinite(v) || v <= 0) return;
+                  patchImmediate({ styleBodyFontSizePx: v });
+                }}
+              />
+              <button
+                type="button"
+                className="shrink-0 rounded border border-zinc-600 px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800"
+                onClick={() => patchImmediate({ styleBodyFontSizePx: undefined })}
+              >
+                Default
+              </button>
+            </div>
+          </Field>
+        </>
+      ) : null}
+    </>
+  );
+}
 
 interface InspectorPanelProps {
   selectedNode: Node<OpenSeerNodeData> | null;
@@ -167,6 +412,11 @@ function InspectorNodeEditor({
     scheduleNodePatch(patch);
   };
 
+  const patchImmediate = (patch: Partial<OpenSeerNodeData>) => {
+    setDraft((d) => ({ ...d, ...patch }));
+    onPatchNode(id, patch);
+  };
+
   const tagsStr = draft.tags.join(", ");
 
   const draftRef = useRef(draft);
@@ -270,6 +520,7 @@ function InspectorNodeEditor({
             onChange={(e) => applyDebounced({ title: e.target.value })}
           />
         </Field>
+        <InspectorNodeTypographySection draft={draft} patchImmediate={patchImmediate} />
         {draft.nodeType !== "code" ? (
           <Field label="Short description">
             <textarea
@@ -755,6 +1006,16 @@ export function InspectorPanel({
   if (selectedEdge && !selectedNode) {
     const d = selectedEdge.data ?? { label: "relates_to", relationshipType: "relates_to" };
     const routing: OpenSeerEdgeRouting = d.type ?? "orthogonal";
+    const arrowStyle: OpenSeerEdgeArrowStyle =
+      d.arrowStyle === "none" || d.arrowStyle === "both" ? d.arrowStyle : "end";
+    const thickness =
+      typeof d.strokeWidthPx === "number" && Number.isFinite(d.strokeWidthPx) && d.strokeWidthPx > 0
+        ? d.strokeWidthPx
+        : 1.5;
+    const colorPickerValue =
+      typeof d.strokeColor === "string" && /^#[0-9A-Fa-f]{6}$/.test(d.strokeColor.trim())
+        ? d.strokeColor.trim()
+        : "#64748b";
     return (
       <aside className="flex h-full w-[340px] shrink-0 flex-col border-l border-zinc-800 bg-zinc-950/95">
         <div className="border-b border-zinc-800 px-4 py-3">
@@ -790,16 +1051,116 @@ export function InspectorPanel({
             <select
               className={inputClass}
               value={routing}
-              onChange={(e) =>
+              onChange={(e) => {
+                const next = e.target.value as OpenSeerEdgeRouting;
                 onPatchEdge(selectedEdge.id, {
                   ...d,
-                  type: e.target.value as OpenSeerEdgeRouting,
-                })
-              }
+                  type: next,
+                  orthogonalPath: next === "orthogonal" ? d.orthogonalPath : undefined,
+                });
+              }}
             >
               <option value="straight">Straight</option>
               <option value="orthogonal">Orthogonal</option>
               <option value="bezier">Curved</option>
+            </select>
+          </Field>
+          <Field label="Edge color">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="color"
+                aria-label="Edge color"
+                className="h-9 w-14 shrink-0 cursor-pointer rounded border border-zinc-700 bg-zinc-900 p-0.5"
+                value={colorPickerValue}
+                onChange={(ev) =>
+                  onPatchEdge(selectedEdge.id, {
+                    ...d,
+                    strokeColor: ev.target.value,
+                  })
+                }
+              />
+              <input
+                className={`${inputClass} min-w-[8rem] flex-1 font-mono text-xs`}
+                value={typeof d.strokeColor === "string" ? d.strokeColor : ""}
+                placeholder="#64748b or hsl(…)"
+                onChange={(ev) =>
+                  onPatchEdge(selectedEdge.id, {
+                    ...d,
+                    strokeColor: ev.target.value.trim() === "" ? undefined : ev.target.value.trim(),
+                  })
+                }
+              />
+              <button
+                type="button"
+                className="shrink-0 rounded border border-zinc-600 px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800"
+                onClick={() =>
+                  onPatchEdge(selectedEdge.id, {
+                    ...d,
+                    strokeColor: undefined,
+                  })
+                }
+              >
+                Default
+              </button>
+            </div>
+          </Field>
+          <Field label="Edge thickness">
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={1}
+                max={8}
+                step={0.5}
+                className="min-w-0 flex-1 accent-sky-500"
+                value={thickness}
+                onChange={(ev) =>
+                  onPatchEdge(selectedEdge.id, {
+                    ...d,
+                    strokeWidthPx: Number(ev.target.value),
+                  })
+                }
+              />
+              <input
+                className="w-16 rounded border border-zinc-700 bg-zinc-900/80 px-1.5 py-1 text-right text-xs tabular-nums text-zinc-100"
+                type="number"
+                min={0.5}
+                max={24}
+                step={0.5}
+                value={thickness}
+                onChange={(ev) => {
+                  const v = Number(ev.target.value);
+                  if (!Number.isFinite(v) || v <= 0) return;
+                  onPatchEdge(selectedEdge.id, { ...d, strokeWidthPx: v });
+                }}
+              />
+              <button
+                type="button"
+                className="shrink-0 rounded border border-zinc-600 px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800"
+                onClick={() =>
+                  onPatchEdge(selectedEdge.id, {
+                    ...d,
+                    strokeWidthPx: undefined,
+                  })
+                }
+              >
+                Default
+              </button>
+            </div>
+          </Field>
+          <Field label="Arrow style">
+            <select
+              className={inputClass}
+              value={arrowStyle}
+              onChange={(ev) =>
+                onPatchEdge(selectedEdge.id, {
+                  ...d,
+                  arrowStyle: ev.target.value as OpenSeerEdgeArrowStyle,
+                })
+              }
+            >
+              <option value="none">None</option>
+              <option value="end">End arrow</option>
+              <option value="both">Both ends</option>
             </select>
           </Field>
           <button
