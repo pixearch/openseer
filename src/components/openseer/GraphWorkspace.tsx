@@ -95,6 +95,7 @@ import {
   ungroupFrame,
   ungroupNodeFromFrame,
 } from "@/lib/graph/nested-graph";
+import { nodeHasAnyTag, normalizeStoredTags } from "@/lib/node-tags";
 import { minimapColorForNodeType } from "@/lib/node-type-meta";
 import {
   documentFromState,
@@ -123,6 +124,8 @@ const defaultEdgeOptions = {
   selectable: true,
   interactionWidth: 24,
 };
+
+const reactFlowProOptions = { hideAttribution: true };
 
 const CTX_MENU_W = 208;
 const CTX_MENU_H_NODES = 300;
@@ -219,6 +222,31 @@ function isVisibleOnCanvas(
   const t = node.data.nodeType;
   if (!WORKSPACE_TYPE_SET.has(t)) return true;
   return visibleTypes.has(t);
+}
+
+type GraphTagCanvasMode = "none" | "show_only" | "hide_only";
+
+function passesGraphTagVisibility(
+  node: Node<OpenSeerNodeData>,
+  selectedTags: Set<string>,
+  mode: GraphTagCanvasMode
+): boolean {
+  if (selectedTags.size === 0) return true;
+  if (mode === "none") return true;
+  const hit = nodeHasAnyTag(node.data.tags, selectedTags);
+  if (mode === "show_only") return hit;
+  return !hit;
+}
+
+function isNodeOnWorkspaceCanvas(
+  node: Node<OpenSeerNodeData>,
+  visibleTypes: Set<OpenSeerNodeType>,
+  selectedTags: Set<string>,
+  tagMode: GraphTagCanvasMode
+): boolean {
+  return (
+    isVisibleOnCanvas(node, visibleTypes) && passesGraphTagVisibility(node, selectedTags, tagMode)
+  );
 }
 
 type AlignmentGuidesState = { verticalXs: number[]; horizontalYs: number[] };
@@ -368,6 +396,8 @@ function GraphWorkspaceInner() {
   const [visibleTypes, setVisibleTypes] = useState<Set<OpenSeerNodeType>>(
     () => new Set(GRAPH_WORKSPACE_NODE_TYPE_LIST)
   );
+  const [graphTagPick, setGraphTagPick] = useState<string[]>([]);
+  const [graphTagMode, setGraphTagMode] = useState<GraphTagCanvasMode>("none");
   const [selection, setSelection] = useState<{
     nodeId: string | null;
     edgeId: string | null;
@@ -514,6 +544,44 @@ function GraphWorkspaceInner() {
     () => getViewGraph(doc.nodes, doc.edges, groupPath),
     [doc.nodes, doc.edges, groupPath]
   );
+
+  const graphTagPickSet = useMemo(() => new Set(graphTagPick), [graphTagPick]);
+
+  const allGraphTags = useMemo(() => {
+    const s = new Set<string>();
+    for (const n of view.nodes) {
+      for (const t of normalizeStoredTags(n.data.tags)) {
+        s.add(t);
+      }
+    }
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }, [view.nodes]);
+
+  const onToggleGraphTag = useCallback((tag: string) => {
+    setGraphTagPick((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return [...next].sort((a, b) => a.localeCompare(b));
+    });
+  }, []);
+
+  const onGraphTagShowOnly = useCallback(() => {
+    setGraphTagMode("show_only");
+  }, []);
+
+  const onGraphTagHideOnly = useCallback(() => {
+    setGraphTagMode("hide_only");
+  }, []);
+
+  const onGraphTagShowAll = useCallback(() => {
+    setGraphTagMode("none");
+  }, []);
+
+  const onGraphTagClear = useCallback(() => {
+    setGraphTagPick([]);
+    setGraphTagMode("none");
+  }, []);
 
   useEffect(() => {
     const id = window.requestAnimationFrame(() => {
@@ -1179,7 +1247,9 @@ function GraphWorkspaceInner() {
   }, []);
 
   const flowNodes = useMemo(() => {
-    const filtered = view.nodes.filter((n) => isVisibleOnCanvas(n, visibleTypes));
+    const filtered = view.nodes.filter((n) =>
+      isNodeOnWorkspaceCanvas(n, visibleTypes, graphTagPickSet, graphTagMode)
+    );
     const byId = new Map(filtered.map((n) => [n.id, n]));
     for (const n of filtered) {
       let pid: string | undefined = n.parentId;
@@ -1191,8 +1261,18 @@ function GraphWorkspaceInner() {
         pid = p.parentId;
       }
     }
-    return sortParentsBeforeChildren([...byId.values()]);
-  }, [view.nodes, visibleTypes]);
+    const sorted = sortParentsBeforeChildren([...byId.values()]);
+    const tagHighlight = graphTagPick.length > 0 && graphTagMode === "none";
+    if (!tagHighlight) return sorted;
+    return sorted.map((n) => {
+      const hit = nodeHasAnyTag(n.data.tags, graphTagPickSet);
+      const extra = hit
+        ? " !ring-2 !ring-amber-400/80 !ring-offset-1 !ring-offset-[#0c0c0e]"
+        : " opacity-50";
+      const cls = [n.className, extra].filter(Boolean).join(" ");
+      return { ...n, className: cls || undefined };
+    });
+  }, [view.nodes, visibleTypes, graphTagPick, graphTagPickSet, graphTagMode]);
 
   const flowEdges = useMemo(() => {
     const byId = new Map(view.nodes.map((n) => [n.id, n]));
@@ -1202,8 +1282,8 @@ function GraphWorkspaceInner() {
       return (
         s !== undefined &&
         t !== undefined &&
-        isVisibleOnCanvas(s, visibleTypes) &&
-        isVisibleOnCanvas(t, visibleTypes)
+        isNodeOnWorkspaceCanvas(s, visibleTypes, graphTagPickSet, graphTagMode) &&
+        isNodeOnWorkspaceCanvas(t, visibleTypes, graphTagPickSet, graphTagMode)
       );
     });
     const base = list.map((e) => {
@@ -1268,7 +1348,15 @@ function GraphWorkspaceInner() {
       };
     });
     return base;
-  }, [view.edges, view.nodes, visibleTypes, edgeInsertHoverId, hoveredEdgeId]);
+  }, [
+    view.edges,
+    view.nodes,
+    visibleTypes,
+    graphTagPickSet,
+    graphTagMode,
+    edgeInsertHoverId,
+    hoveredEdgeId,
+  ]);
 
   const updateEdgeInsertHover = useCallback(
     (e: { clientX: number; clientY: number }, draggedNodeId: string) => {
@@ -1366,8 +1454,8 @@ function GraphWorkspaceInner() {
         if (
           !sView ||
           !tView ||
-          !isVisibleOnCanvas(sView, visibleTypes) ||
-          !isVisibleOnCanvas(tView, visibleTypes)
+          !isNodeOnWorkspaceCanvas(sView, visibleTypes, graphTagPickSet, graphTagMode) ||
+          !isNodeOnWorkspaceCanvas(tView, visibleTypes, graphTagPickSet, graphTagMode)
         ) {
           continue;
         }
@@ -1425,7 +1513,7 @@ function GraphWorkspaceInner() {
         return next;
       });
     },
-    [screenToFlowPosition, store, visibleTypes]
+    [screenToFlowPosition, store, visibleTypes, graphTagPickSet, graphTagMode]
   );
 
   const recomputeAlignmentGuides = useCallback(
@@ -1440,7 +1528,14 @@ function GraphWorkspaceInner() {
       const others: AlignBounds[] = [];
       for (const [, n] of nodeLookup) {
         if (excludeIds.has(n.id)) continue;
-        if (!isVisibleOnCanvas(n.internals.userNode as Node<OpenSeerNodeData>, visibleTypes)) {
+        if (
+          !isNodeOnWorkspaceCanvas(
+            n.internals.userNode as Node<OpenSeerNodeData>,
+            visibleTypes,
+            graphTagPickSet,
+            graphTagMode
+          )
+        ) {
           continue;
         }
         const b = boundsFromInternalNode(n);
@@ -1450,7 +1545,7 @@ function GraphWorkspaceInner() {
       if (g.verticalXs.length === 0 && g.horizontalYs.length === 0) setAlignmentGuides(null);
       else setAlignmentGuides(g);
     },
-    [gridSnapEnabled, store, visibleTypes]
+    [gridSnapEnabled, store, visibleTypes, graphTagPickSet, graphTagMode]
   );
 
   const handleNodeDrag: OnNodeDrag<Node<OpenSeerNodeData>> = useCallback(
@@ -1488,10 +1583,12 @@ function GraphWorkspaceInner() {
 
   const onPatchNode = useCallback(
     (id: string, patch: Partial<OpenSeerNodeData>) => {
+      const normalized: Partial<OpenSeerNodeData> =
+        patch.tags !== undefined ? { ...patch, tags: normalizeStoredTags(patch.tags) } : patch;
       setDoc((d) => {
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const nn = v.nodes.map((n) =>
-          n.id === id ? { ...n, data: { ...n.data, ...patch } } : n
+          n.id === id ? { ...n, data: { ...n.data, ...normalized } } : n
         );
         if (groupPath.length === 0) return { nodes: nn, edges: d.edges };
         return {
@@ -1506,10 +1603,12 @@ function GraphWorkspaceInner() {
   const onPatchNodes = useCallback(
     (ids: string[], patch: Partial<OpenSeerNodeData>) => {
       const set = new Set(ids);
+      const normalized: Partial<OpenSeerNodeData> =
+        patch.tags !== undefined ? { ...patch, tags: normalizeStoredTags(patch.tags) } : patch;
       setDoc((d) => {
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const nn = v.nodes.map((n) =>
-          set.has(n.id) ? { ...n, data: { ...n.data, ...patch } } : n
+          set.has(n.id) ? { ...n, data: { ...n.data, ...normalized } } : n
         );
         if (groupPath.length === 0) return { nodes: nn, edges: d.edges };
         return {
@@ -2620,7 +2719,7 @@ function GraphWorkspaceInner() {
           defaultEdgeOptions={defaultEdgeOptions}
           elementsSelectable
           fitView
-          proOptions={{ hideAttribution: true }}
+          proOptions={reactFlowProOptions}
           deleteKeyCode={["Backspace", "Delete"]}
           selectionOnDrag
           panOnDrag={[1, 2]}
@@ -2947,6 +3046,14 @@ function GraphWorkspaceInner() {
           onLoadDemo={onLoadDemo}
           onNewBlank={onNewBlank}
           onAddNode={onAddNode}
+          graphAllTags={allGraphTags}
+          graphTagPick={graphTagPick}
+          graphTagMode={graphTagMode}
+          onToggleGraphTag={onToggleGraphTag}
+          onGraphTagShowOnly={onGraphTagShowOnly}
+          onGraphTagHideOnly={onGraphTagHideOnly}
+          onGraphTagShowAll={onGraphTagShowAll}
+          onGraphTagClear={onGraphTagClear}
         />
       ) : null}
       <div

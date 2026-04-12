@@ -6,6 +6,8 @@ import { CodeEditorTextarea } from "@/components/openseer/CodeEditorTextarea";
 import { useDebouncedPatchNode } from "@/hooks/use-debounced-graph-patch";
 import { copyAllCodeBlocks, newCodeBlockId, normalizeCodeBlocksForDisplay } from "@/lib/code-blocks";
 import { DEFAULT_TITLE_BY_TYPE } from "@/lib/node-type-meta";
+import { NodeTagChipInput } from "@/components/openseer/NodeTagChipInput";
+import { normalizeStoredTags } from "@/lib/node-tags";
 import { parseYoutubeVideoId } from "@/lib/youtube";
 import { colorInputHex6 } from "@/lib/node-font-styles";
 import type {
@@ -405,8 +407,10 @@ function InspectorNodeEditor({
 }) {
   const id = node.id;
   const scheduleNodePatch = useDebouncedPatchNode(id, onPatchNode);
-  const [draft, setDraft] = useState<OpenSeerNodeData>(() => ({ ...node.data }));
-
+  const [draft, setDraft] = useState<OpenSeerNodeData>(() => ({
+    ...node.data,
+    tags: normalizeStoredTags(node.data.tags),
+  }));
   const applyDebounced = (patch: Partial<OpenSeerNodeData>) => {
     setDraft((d) => ({ ...d, ...patch }));
     scheduleNodePatch(patch);
@@ -416,8 +420,6 @@ function InspectorNodeEditor({
     setDraft((d) => ({ ...d, ...patch }));
     onPatchNode(id, patch);
   };
-
-  const tagsStr = draft.tags.join(", ");
 
   const draftRef = useRef(draft);
   useLayoutEffect(() => {
@@ -430,7 +432,7 @@ function InspectorNodeEditor({
     const next = node.data.videoUrl ?? "";
     if (next === prevVideoUrlRef.current) return;
     prevVideoUrlRef.current = next;
-    setDraft((d) => ({ ...d, videoUrl: next }));
+    queueMicrotask(() => setDraft((d) => ({ ...d, videoUrl: next })));
   }, [node.data.videoUrl, node.data.nodeType, node.id]);
 
   const prevTextBodyRef = useRef(node.data.shortDescription ?? "");
@@ -439,7 +441,7 @@ function InspectorNodeEditor({
     const next = node.data.shortDescription ?? "";
     if (next === prevTextBodyRef.current) return;
     prevTextBodyRef.current = next;
-    setDraft((d) => ({ ...d, shortDescription: next }));
+    queueMicrotask(() => setDraft((d) => ({ ...d, shortDescription: next })));
   }, [node.data.shortDescription, node.data.nodeType, node.id]);
 
   const prevDocumentUrlRef = useRef(node.data.documentUrl ?? "");
@@ -448,7 +450,7 @@ function InspectorNodeEditor({
     const next = node.data.documentUrl ?? "";
     if (next === prevDocumentUrlRef.current) return;
     prevDocumentUrlRef.current = next;
-    setDraft((d) => ({ ...d, documentUrl: next }));
+    queueMicrotask(() => setDraft((d) => ({ ...d, documentUrl: next })));
   }, [node.data.documentUrl, node.data.nodeType, node.id]);
 
   useEffect(() => {
@@ -637,18 +639,19 @@ function InspectorNodeEditor({
             onChange={(e) => applyDebounced({ owner: e.target.value })}
           />
         </Field>
-        <Field label="Tags (comma-separated)">
-          <input
-            className={inputClass}
-            value={tagsStr}
-            onChange={(e) =>
-              applyDebounced({
-                tags: e.target.value
-                  .split(",")
-                  .map((t) => t.trim())
-                  .filter(Boolean),
-              })
-            }
+        <Field label="Tags">
+          <NodeTagChipInput
+            tags={draft.tags}
+            onTagsChange={(next) => {
+              const tags = normalizeStoredTags(next);
+              setDraft((d) => ({ ...d, tags }));
+              scheduleNodePatch({ tags });
+            }}
+            onTagsCommit={(next) => {
+              const tags = normalizeStoredTags(next);
+              setDraft((d) => ({ ...d, tags }));
+              onPatchNode(id, { tags });
+            }}
           />
         </Field>
         <Field label="Notes">

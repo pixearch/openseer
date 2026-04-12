@@ -44,6 +44,7 @@ import {
   resolveBodyTextStyle,
   resolveHeaderTitleStyle,
 } from "@/lib/node-font-styles";
+import { normalizeStoredTags } from "@/lib/node-tags";
 import { getNodeChromeStyles } from "@/lib/node-style-chrome";
 import type { CodeBlockEntry, OpenSeerEdgeData, OpenSeerNodeData } from "@/lib/types/graph";
 import { parseYoutubeVideoId, youtubeThumbnailUrl } from "@/lib/youtube";
@@ -441,8 +442,9 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   const statusClass = STATUS_DOT[data.status] ?? "bg-zinc-500";
   const chrome = getNodeChromeStyles(data);
 
-  const previewTags = data.tags.slice(0, 2);
-  const moreTags = data.tags.length > 2 ? data.tags.length - 2 : 0;
+  const tagList = normalizeStoredTags(data.tags);
+  const previewTags = tagList.slice(0, 2);
+  const moreTags = tagList.length > 2 ? tagList.length - 2 : 0;
 
   const resizerGroup = (
     <NodeResizer

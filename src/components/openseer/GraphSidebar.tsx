@@ -5,6 +5,8 @@ import { NODE_TYPE_LABEL } from "@/lib/node-type-meta";
 import type { OpenSeerNodeType } from "@/lib/types/graph";
 import { GRAPH_WORKSPACE_NODE_TYPE_LIST } from "@/lib/types/graph";
 
+type GraphTagCanvasMode = "none" | "show_only" | "hide_only";
+
 interface GraphSidebarProps {
   graphName: string;
   onGraphNameChange: (name: string) => void;
@@ -18,6 +20,14 @@ interface GraphSidebarProps {
   onLoadDemo: () => void;
   onNewBlank: () => void;
   onAddNode: (t: OpenSeerNodeType) => void;
+  graphAllTags: string[];
+  graphTagPick: string[];
+  graphTagMode: GraphTagCanvasMode;
+  onToggleGraphTag: (tag: string) => void;
+  onGraphTagShowOnly: () => void;
+  onGraphTagHideOnly: () => void;
+  onGraphTagShowAll: () => void;
+  onGraphTagClear: () => void;
 }
 
 function ChevronLeftIcon() {
@@ -49,6 +59,14 @@ export function GraphSidebar({
   onLoadDemo,
   onNewBlank,
   onAddNode,
+  graphAllTags,
+  graphTagPick,
+  graphTagMode,
+  onToggleGraphTag,
+  onGraphTagShowOnly,
+  onGraphTagHideOnly,
+  onGraphTagShowAll,
+  onGraphTagClear,
 }: GraphSidebarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const addWrapRef = useRef<HTMLDivElement>(null);
@@ -56,7 +74,8 @@ export function GraphSidebar({
   const closeMenu = useCallback(() => setMenuOpen(false), []);
 
   useEffect(() => {
-    if (collapsed) setMenuOpen(false);
+    if (!collapsed) return;
+    queueMicrotask(() => setMenuOpen(false));
   }, [collapsed]);
 
   if (collapsed) {
@@ -202,6 +221,67 @@ export function GraphSidebar({
       </div>
 
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-3">
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Tags</h3>
+          <div className="mt-2 grid grid-cols-2 gap-1.5">
+            <button
+              type="button"
+              disabled={graphTagPick.length === 0}
+              className="rounded border border-zinc-700 px-2 py-1.5 text-[11px] text-zinc-300 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={onGraphTagShowOnly}
+            >
+              Show only
+            </button>
+            <button
+              type="button"
+              disabled={graphTagPick.length === 0}
+              className="rounded border border-zinc-700 px-2 py-1.5 text-[11px] text-zinc-300 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={onGraphTagHideOnly}
+            >
+              Hide only
+            </button>
+            <button
+              type="button"
+              className="rounded border border-zinc-700 px-2 py-1.5 text-[11px] text-zinc-300 hover:bg-zinc-900"
+              onClick={onGraphTagShowAll}
+            >
+              Show all
+            </button>
+            <button
+              type="button"
+              disabled={graphTagPick.length === 0 && graphTagMode === "none"}
+              className="rounded border border-zinc-700 px-2 py-1.5 text-[11px] text-zinc-300 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={onGraphTagClear}
+            >
+              Clear
+            </button>
+          </div>
+          {graphAllTags.length === 0 ? (
+            <p className="mt-2 text-[11px] leading-snug text-zinc-600">No tags on nodes in this graph.</p>
+          ) : (
+            <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto">
+              {graphAllTags.map((tag) => {
+                const on = graphTagPick.includes(tag);
+                return (
+                  <li key={tag}>
+                    <button
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => onToggleGraphTag(tag)}
+                      className={`w-full rounded px-2 py-1.5 text-left text-sm transition-colors ${
+                        on
+                          ? "bg-sky-950/80 text-sky-100 ring-1 ring-sky-600/60"
+                          : "text-zinc-300 hover:bg-zinc-900/80"
+                      }`}
+                    >
+                      {tag}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Node types</h3>
           <button
