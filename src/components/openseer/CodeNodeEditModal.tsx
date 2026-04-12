@@ -1,7 +1,7 @@
 "use client";
 
 import type { Node } from "@xyflow/react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { CodeEditorTextarea } from "@/components/openseer/CodeEditorTextarea";
 import {
@@ -37,6 +37,19 @@ export function CodeNodeEditModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [insertSlot, setInsertSlot] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!draggingId) return;
+    const end = () => {
+      setDraggingId(null);
+      setInsertSlot(null);
+    };
+    window.addEventListener("dragend", end);
+    return () => window.removeEventListener("dragend", end);
+  }, [draggingId]);
+
   if (!open || !nodeId || !node) return null;
 
   const blocks = normalizeCodeBlocksForDisplay(node.id, node.data.codeBlocks);
@@ -45,22 +58,16 @@ export function CodeNodeEditModal({
     onPatchNode(nodeId, { codeBlocks: next });
   };
 
-  const reorderBefore = (dragId: string, beforeId: string) => {
-    const b = [...blocks];
-    const item = b.find((x) => x.id === dragId);
-    if (!item) return;
-    const filtered = b.filter((x) => x.id !== dragId);
-    const idx = filtered.findIndex((x) => x.id === beforeId);
-    if (idx === -1) filtered.push(item);
-    else filtered.splice(idx, 0, item);
-    updateBlocks(filtered);
-  };
-
-  const reorderToEnd = (dragId: string) => {
-    const b = [...blocks];
-    const item = b.find((x) => x.id === dragId);
-    if (!item) return;
-    updateBlocks([...b.filter((x) => x.id !== dragId), item]);
+  const reorderToSlot = (dragId: string, slot: number) => {
+    const cur = [...blocks];
+    const from = cur.findIndex((x) => x.id === dragId);
+    if (from === -1) return;
+    const [item] = cur.splice(from, 1);
+    let s = slot;
+    if (from < s) s -= 1;
+    s = Math.max(0, Math.min(s, cur.length));
+    cur.splice(s, 0, item);
+    updateBlocks(cur);
   };
 
   const copyAll = () => void navigator.clipboard.writeText(copyAllCodeBlocks(blocks));
@@ -101,25 +108,44 @@ export function CodeNodeEditModal({
             </button>
           </div>
         </div>
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-          {blocks.map((block) => (
-            <div
-              key={block.id}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const dragId = e.dataTransfer.getData("text/cb-id");
-                if (!dragId || dragId === block.id) return;
-                reorderBefore(dragId, block.id);
-              }}
-              className="flex gap-2 rounded-md border border-zinc-800 bg-zinc-950/80 p-2"
-            >
+        <div
+          className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            const dragId = e.dataTransfer.getData("text/cb-id");
+            if (!dragId || insertSlot === null) return;
+            reorderToSlot(dragId, insertSlot);
+            setDraggingId(null);
+            setInsertSlot(null);
+          }}
+        >
+          {blocks.map((block, idx) => (
+            <div key={block.id}>
+              {draggingId && insertSlot === idx ? (
+                <div
+                  className="mb-2 h-0.5 w-full rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]"
+                  aria-hidden
+                />
+              ) : null}
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (!draggingId) return;
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const upper = e.clientY < rect.top + rect.height / 2;
+                  setInsertSlot(upper ? idx : idx + 1);
+                }}
+                className="flex gap-2 rounded-md border border-zinc-800 bg-zinc-950/80 p-2"
+              >
               <button
                 type="button"
                 draggable
                 onDragStart={(e) => {
                   e.dataTransfer.setData("text/cb-id", block.id);
                   e.dataTransfer.effectAllowed = "move";
+                  setDraggingId(block.id);
+                  setInsertSlot(idx);
                 }}
                 className="mt-1 h-8 w-6 shrink-0 cursor-grab rounded border border-zinc-700 bg-zinc-900 text-[10px] leading-none text-zinc-500 hover:bg-zinc-800 active:cursor-grabbing"
                 aria-label="Drag to reorder"
@@ -186,15 +212,19 @@ export function CodeNodeEditModal({
                 </button>
               </div>
             </div>
+            </div>
           ))}
+          {draggingId && insertSlot === blocks.length ? (
+            <div
+              className="mb-2 h-0.5 w-full rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]"
+              aria-hidden
+            />
+          ) : null}
           <div
             className="rounded border border-dashed border-transparent py-2 text-center text-[10px] text-zinc-600 hover:border-zinc-700"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
+            onDragOver={(e) => {
               e.preventDefault();
-              const dragId = e.dataTransfer.getData("text/cb-id");
-              if (!dragId) return;
-              reorderToEnd(dragId);
+              if (draggingId) setInsertSlot(blocks.length);
             }}
           >
             Drop here to move to end
