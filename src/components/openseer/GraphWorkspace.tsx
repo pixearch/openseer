@@ -52,6 +52,12 @@ import {
   NODE_STANDARD_WIDTH,
 } from "@/lib/default-node";
 import {
+  isExcludedFromChainType,
+  pickQuadrilateralChainHandles,
+  sizeForNewNodeType,
+  sortNodesForChainLayout,
+} from "@/lib/graph/chain-helpers";
+import {
   applyMultiNodeAlign,
   applyMultiNodeDistribute,
   buildProportionalLayoutState,
@@ -430,6 +436,9 @@ function GraphWorkspaceInner() {
   const [graphPanelCollapsed, setGraphPanelCollapsed] = useState(false);
   const [showNodeTypeHeadings, setShowNodeTypeHeadings] = useState(true);
   const [gridSnapEnabled, setGridSnapEnabled] = useState(false);
+  const [chainMode, setChainMode] = useState(false);
+  const chainSourceIdRef = useRef<string | null>(null);
+  const chainRadialFlowRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuidesState | null>(null);
   const [alignOverlay, setAlignOverlay] = useState<null | "align" | "distribute">(null);
   const [proportionalMoveUi, setProportionalMoveUi] = useState(false);
@@ -849,6 +858,12 @@ function GraphWorkspaceInner() {
       }
 
       if (e.key === "Escape") {
+        if (chainMode) {
+          e.preventDefault();
+          setChainMode(false);
+          chainSourceIdRef.current = null;
+          return;
+        }
         if (proportionalLayoutRef.current) {
           e.preventDefault();
           proportionalLayoutRef.current = null;
@@ -873,6 +888,68 @@ function GraphWorkspaceInner() {
       }
 
       if (!graphPointerInside.current) return;
+
+      if (k === "c" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (e.repeat) return;
+        if (textEditOpenRef.current || codeEditOpenRef.current) return;
+        e.preventDefault();
+        setChainMode((m) => !m);
+        chainSourceIdRef.current = null;
+        return;
+      }
+
+      if (e.key === "Enter" && chainMode) {
+        const m = selectionRef.current.multiNodeIds;
+        if (m && m.length >= 2) {
+          e.preventDefault();
+          const d0 = docRef.current;
+          const path0 = groupPathRef.current;
+          const v0 = getViewGraph(d0.nodes, d0.edges, path0);
+          const pickNodes = m
+            .map((id) => v0.nodes.find((n) => n.id === id))
+            .filter((n): n is Node<OpenSeerNodeData> => n != null);
+          const sorted = sortNodesForChainLayout(pickNodes);
+          if (sorted.length >= 2) {
+            setDoc((d) => {
+              if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
+              const gPath = groupPathRef.current;
+              const v = getViewGraph(d.nodes, d.edges, gPath);
+              let ne = v.edges;
+              for (let i = 0; i < sorted.length - 1; i++) {
+                const a = sorted[i];
+                const b = sorted[i + 1];
+                if (ne.some((ed) => ed.source === a.id && ed.target === b.id)) continue;
+                if (isExcludedFromChainType(a.data.nodeType) || isExcludedFromChainType(b.data.nodeType)) {
+                  continue;
+                }
+                const h = pickQuadrilateralChainHandles(a.id, b.id, a, b);
+                const eid = `e-${a.id}-${b.id}-${crypto.randomUUID().slice(0, 8)}`;
+                const newEdge: Edge<OpenSeerEdgeData> = {
+                  id: eid,
+                  source: a.id,
+                  target: b.id,
+                  sourceHandle: h.sourceHandle,
+                  targetHandle: h.targetHandle,
+                  type: "openSeerEdge",
+                  markerEnd: defaultEdgeOptions.markerEnd,
+                  style: defaultEdgeOptions.style,
+                  selectable: defaultEdgeOptions.selectable,
+                  interactionWidth: defaultEdgeOptions.interactionWidth,
+                  label: "relates_to",
+                  data: { label: "relates_to", relationshipType: "relates_to" },
+                };
+                ne = addEdge(newEdge, ne);
+              }
+              if (gPath.length === 0) return { nodes: d.nodes, edges: ne };
+              return {
+                nodes: patchNestedGraph(d.nodes, gPath, v.nodes, ne),
+                edges: d.edges,
+              };
+            });
+          }
+        }
+        return;
+      }
 
       if (e.code === "KeyG") {
         if (controlPointGrabRef.current) {
@@ -1122,7 +1199,16 @@ function GraphWorkspaceInner() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ctxMenu, fitView, focusMode, screenToFlowPosition, performUndo, performRedo, pushUndoSnapshot]);
+  }, [
+    ctxMenu,
+    fitView,
+    focusMode,
+    chainMode,
+    screenToFlowPosition,
+    performUndo,
+    performRedo,
+    pushUndoSnapshot,
+  ]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1392,6 +1478,80 @@ function GraphWorkspaceInner() {
     },
     []
   );
+
+  const selectionMultiKey = selection.multiNodeIds?.join("\0") ?? "";
+
+  useEffect(() => {
+    if (!chainMode) {
+      return;
+    }
+    if (selectionMultiKey.length > 0) {
+      chainSourceIdRef.current = null;
+      return;
+    }
+    const id = selection.nodeId;
+    if (!id) {
+      chainSourceIdRef.current = null;
+      return;
+    }
+    const d = docRef.current;
+    const gPath = groupPathRef.current;
+    const v = getViewGraph(d.nodes, d.edges, gPath);
+    const node = v.nodes.find((n) => n.id === id);
+    if (!node) {
+      return;
+    }
+    if (isExcludedFromChainType(node.data.nodeType)) {
+      return;
+    }
+    const from = chainSourceIdRef.current;
+    if (from === null) {
+      chainSourceIdRef.current = id;
+      return;
+    }
+    if (from === id) {
+      return;
+    }
+    const sNode = v.nodes.find((n) => n.id === from);
+    if (!sNode || isExcludedFromChainType(sNode.data.nodeType)) {
+      return;
+    }
+    if (v.edges.some((e) => e.source === from && e.target === id)) {
+      chainSourceIdRef.current = id;
+      return;
+    }
+    const h = pickQuadrilateralChainHandles(from, id, sNode, node);
+    const eid = `e-${from}-${id}-${crypto.randomUUID().slice(0, 8)}`;
+    const newEdge: Edge<OpenSeerEdgeData> = {
+      id: eid,
+      source: from,
+      target: id,
+      sourceHandle: h.sourceHandle,
+      targetHandle: h.targetHandle,
+      type: "openSeerEdge",
+      markerEnd: defaultEdgeOptions.markerEnd,
+      style: defaultEdgeOptions.style,
+      selectable: defaultEdgeOptions.selectable,
+      interactionWidth: defaultEdgeOptions.interactionWidth,
+      label: "relates_to",
+      data: { label: "relates_to", relationshipType: "relates_to" },
+    };
+    setDoc((doc) => {
+      if (!isApplyingHistoryRef.current) pushUndoSnapshot(doc);
+      const path = groupPathRef.current;
+      const v2 = getViewGraph(doc.nodes, doc.edges, path);
+      if (v2.edges.some((e) => e.source === from && e.target === id)) {
+        return doc;
+      }
+      const ne = addEdge(newEdge, v2.edges);
+      if (path.length === 0) return { nodes: doc.nodes, edges: ne };
+      return {
+        nodes: patchNestedGraph(doc.nodes, path, v2.nodes, ne),
+        edges: doc.edges,
+      };
+    });
+    chainSourceIdRef.current = id;
+  }, [chainMode, selection.nodeId, selectionMultiKey, pushUndoSnapshot, setDoc]);
 
   const onNodesDelete = useCallback((deleted: Node<OpenSeerNodeData>[]) => {
     if (textEditNodeId && deleted.some((n) => n.id === textEditNodeId)) {
@@ -2503,6 +2663,87 @@ function GraphWorkspaceInner() {
     [screenToFlowPosition, onAddNodeAt]
   );
 
+  const onChainBatchFromRadial = useCallback(
+    (nodeType: OpenSeerNodeType, count: number, layout: "h" | "v") => {
+      if (isExcludedFromChainType(nodeType) || count < 1) {
+        return;
+      }
+      setDoc((d) => {
+        if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
+        const path = groupPathRef.current;
+        const v = getViewGraph(d.nodes, d.edges, path);
+        const { w, h } = sizeForNewNodeType(nodeType);
+        const isGroup = nodeType === "group";
+        const el = flowAreaRef.current;
+        const rect = el?.getBoundingClientRect();
+        const centerScreen = {
+          x: rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
+          y: rect ? rect.top + rect.height / 2 : window.innerHeight / 2,
+        };
+        const centerFlow = screenToFlowPosition(centerScreen);
+        const fp = lastGraphPointerFlow.current;
+        const r = chainRadialFlowRef.current;
+        const flowX = fp != null && Number.isFinite(fp.x) ? fp.x : (Number.isFinite(r.x) ? r.x : centerFlow.x);
+        const flowY = fp != null && Number.isFinite(fp.y) ? fp.y : (Number.isFinite(r.y) ? r.y : centerFlow.y);
+        const stepX = w + 48;
+        const stepY = h + 40;
+        const newNodes: Node<OpenSeerNodeData>[] = [];
+        for (let i = 0; i < count; i++) {
+          const id = `n-${crypto.randomUUID()}`;
+          const pos =
+            layout === "h"
+              ? {
+                  x: flowX + (i - (count - 1) / 2) * stepX - w / 2,
+                  y: flowY - h / 2,
+                }
+              : {
+                  x: flowX - w / 2,
+                  y: flowY + (i - (count - 1) / 2) * stepY - h / 2,
+                };
+          newNodes.push({
+            id,
+            type: "openSeer" as const,
+            position: pos,
+            data: createEmptyNodeData(nodeType),
+            width: isGroup ? GROUP_STANDARD_WIDTH : NODE_STANDARD_WIDTH,
+            height: isGroup ? GROUP_STANDARD_HEIGHT : NODE_STANDARD_HEIGHT,
+          });
+        }
+        const orderedAll = sortParentsBeforeChildren([...v.nodes, ...newNodes]);
+        let ne = v.edges;
+        for (let i = 0; i < newNodes.length - 1; i++) {
+          const a = newNodes[i]!;
+          const b = newNodes[i + 1]!;
+          const hnd = pickQuadrilateralChainHandles(a.id, b.id, a, b);
+          const eid = `e-${a.id}-${b.id}-${crypto.randomUUID().slice(0, 8)}`;
+          const eNew: Edge<OpenSeerEdgeData> = {
+            id: eid,
+            source: a.id,
+            target: b.id,
+            sourceHandle: hnd.sourceHandle,
+            targetHandle: hnd.targetHandle,
+            type: "openSeerEdge",
+            markerEnd: defaultEdgeOptions.markerEnd,
+            style: defaultEdgeOptions.style,
+            selectable: defaultEdgeOptions.selectable,
+            interactionWidth: defaultEdgeOptions.interactionWidth,
+            label: "relates_to",
+            data: { label: "relates_to", relationshipType: "relates_to" },
+          };
+          ne = addEdge(eNew, ne);
+        }
+        if (path.length === 0) {
+          return { nodes: orderedAll, edges: ne };
+        }
+        return {
+          nodes: patchNestedGraph(d.nodes, path, orderedAll, ne),
+          edges: d.edges,
+        };
+      });
+    },
+    [pushUndoSnapshot, screenToFlowPosition]
+  );
+
   const openPaneContextMenu = useCallback(
     (e: ReactMouseEvent<Element> | globalThis.MouseEvent) => {
       e.preventDefault();
@@ -2808,6 +3049,10 @@ function GraphWorkspaceInner() {
   const radialPos =
     ctxMenu?.kind === "pane" ? clampRadialMenuCenter(ctxMenu.clientX, ctxMenu.clientY) : null;
 
+  if (ctxMenu?.kind === "pane") {
+    chainRadialFlowRef.current = { x: ctxMenu.flowX, y: ctxMenu.flowY };
+  }
+
   const flowColumn = (
     <div
       ref={flowAreaRef}
@@ -2942,7 +3187,34 @@ function GraphWorkspaceInner() {
             showInteractive={false}
           />
           <Panel position="top-right" className="!m-2 !border-0 !bg-transparent !p-0 !shadow-none">
-            <div className="flex gap-0.5 rounded border border-zinc-800/80 bg-zinc-950/70 p-0.5">
+            <div className="flex items-center gap-0.5 rounded border border-zinc-800/80 bg-zinc-950/70 p-0.5">
+              {chainMode ? (
+                <span
+                  className="inline-flex h-7 w-7 items-center justify-center text-sky-400"
+                  title="Chain mode (C to exit)"
+                  role="status"
+                  aria-label="Chain mode on"
+                >
+                  <svg
+                    className="h-3.5 w-3.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <path d="M9 12a3 3 0 1 0 0-5 3 3 0 0 0 0 5" />
+                    <path d="M9 5H7a2 2 0 0 0-2 2v0a2 2 0 0 0 2 2h.5" />
+                    <path d="M9 5V3" />
+                    <path d="M15 12a3 3 0 1 0 0 5 3 3 0 0 0 0-5" />
+                    <path d="M15 19h2a2 2 0 0 0 2-2v0a2 2 0 0 0-2-2h-.5" />
+                    <path d="M15 19v2" />
+                    <path d="M9 14h6" />
+                  </svg>
+                </span>
+              ) : null}
               <button
                 type="button"
                 aria-label="Undo"
@@ -3107,6 +3379,8 @@ function GraphWorkspaceInner() {
                   setCtxMenu(null);
                 }}
                 onClose={() => setCtxMenu(null)}
+                chainMode={chainMode}
+                onChainBatch={onChainBatchFromRadial}
               />
             </div>
           ) : ctxMenu.kind === "nodes" ? (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isExcludedFromChainType } from "@/lib/graph/chain-helpers";
 import type { OpenSeerNodeType } from "@/lib/types/graph";
 import { GRAPH_WORKSPACE_NODE_TYPE_LIST } from "@/lib/types/graph";
 
@@ -154,15 +155,28 @@ function SegmentIcon({ kind, active }: { kind: OpenSeerNodeType | "exit"; active
   }
 }
 
+type ChainLayout = "h" | "v";
+
 export function RadialCreateNodeMenu({
   onPick,
   onClose,
+  chainMode = false,
+  onChainBatch,
 }: {
   onPick: (nodeType: OpenSeerNodeType) => void;
   onClose: () => void;
+  /** In chain mode, type selection opens a batch (count + layout) before creating. */
+  chainMode?: boolean;
+  onChainBatch?: (nodeType: OpenSeerNodeType, count: number, layout: ChainLayout) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const batchCountInputRef = useRef<HTMLInputElement>(null);
   const [hovered, setHovered] = useState<number | null>(null);
+  const [chainBatch, setChainBatch] = useState<{
+    nodeType: OpenSeerNodeType;
+    countStr: string;
+    layout: ChainLayout;
+  } | null>(null);
   const types = GRAPH_WORKSPACE_NODE_TYPE_LIST;
   const exitIndex = types.length;
   const segmentCount = exitIndex + 1;
@@ -197,25 +211,64 @@ export function RadialCreateNodeMenu({
     [aStart, segmentCount]
   );
 
+  const applyChainBatch = useCallback(() => {
+    if (!chainBatch || !onChainBatch) return;
+    const raw = Math.floor(Number.parseInt(chainBatch.countStr.trim(), 10));
+    const n = Math.min(100, Math.max(1, Number.isFinite(raw) ? raw : 0));
+    if (n < 1) return;
+    onChainBatch(chainBatch.nodeType, n, chainBatch.layout);
+    onClose();
+  }, [chainBatch, onChainBatch, onClose]);
+
+  useEffect(() => {
+    if (chainBatch) {
+      const id = window.requestAnimationFrame(() => batchCountInputRef.current?.focus());
+      return () => window.cancelAnimationFrame(id);
+    }
+    return undefined;
+  }, [chainBatch]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        if (chainBatch) {
+          setChainBatch(null);
+        } else {
+          onClose();
+        }
+        return;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, chainBatch]);
 
   const sizePx = R_OUT * 2;
 
   const centerLabel =
-    hovered === null
+    chainBatch || hovered === null
       ? ""
       : hovered === exitIndex
         ? "Exit"
         : shortRadialLabel(types[hovered]);
+
+  const onSegmentClick = (i: number) => {
+    const isExit = i === exitIndex;
+    if (isExit) {
+      onClose();
+      return;
+    }
+    const nodeType = types[i];
+    if (chainMode && onChainBatch) {
+      if (isExcludedFromChainType(nodeType)) {
+        return;
+      }
+      setChainBatch({ nodeType, countStr: "3", layout: "h" });
+      return;
+    }
+    onPick(nodeType);
+  };
 
   return (
     <div
@@ -248,7 +301,7 @@ export function RadialCreateNodeMenu({
                 strokeWidth={active ? 2 : 1}
                 className="cursor-pointer transition-[fill,stroke-width] duration-100"
                 aria-label={isExit ? "Exit" : shortRadialLabel(types[i])}
-                onClick={() => (isExit ? onClose() : onPick(types[i]))}
+                onClick={() => onSegmentClick(i)}
               />
             );
           })}
@@ -268,17 +321,81 @@ export function RadialCreateNodeMenu({
           })}
         </svg>
         <div
-          className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center"
+          className={
+            chainBatch
+              ? "absolute inset-0 flex items-center justify-center px-4"
+              : "pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center"
+          }
           style={{ padding: Math.max(8, R_IN - 56) }}
           aria-live="polite"
         >
-          <span
-            className={`text-lg font-semibold tracking-tight text-zinc-100 transition-opacity duration-150 ${
-              centerLabel ? "opacity-100" : "opacity-0"
-            }`}
-          >
-            {centerLabel || "\u00a0"}
-          </span>
+          {chainBatch ? (
+            <form
+              className="flex w-full max-w-[5.5rem] flex-col items-stretch gap-1.5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                applyChainBatch();
+              }}
+            >
+              <input
+                ref={batchCountInputRef}
+                type="text"
+                inputMode="numeric"
+                value={chainBatch.countStr}
+                onChange={(e) => setChainBatch((b) => (b ? { ...b, countStr: e.target.value } : b))}
+                onKeyDown={(e) => {
+                  if (e.key === "h" || e.key === "H") {
+                    e.preventDefault();
+                    setChainBatch((b) => (b ? { ...b, layout: "h" } : b));
+                  }
+                  if (e.key === "v" || e.key === "V") {
+                    e.preventDefault();
+                    setChainBatch((b) => (b ? { ...b, layout: "v" } : b));
+                  }
+                }}
+                className="w-full rounded border border-zinc-600 bg-zinc-800 px-1.5 py-0.5 text-center text-sm font-medium text-zinc-100 [appearance:textfield] focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                aria-label="Node count"
+              />
+              <div className="flex justify-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => setChainBatch((b) => (b ? { ...b, layout: "h" } : b))}
+                  className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                    chainBatch.layout === "h"
+                      ? "bg-sky-600 text-white"
+                      : "bg-zinc-800 text-zinc-400"
+                  }`}
+                >
+                  H
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChainBatch((b) => (b ? { ...b, layout: "v" } : b))}
+                  className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                    chainBatch.layout === "v"
+                      ? "bg-sky-600 text-white"
+                      : "bg-zinc-800 text-zinc-400"
+                  }`}
+                >
+                  V
+                </button>
+              </div>
+              <button
+                type="submit"
+                className="rounded border border-zinc-500 bg-zinc-800 py-0.5 text-[11px] font-medium text-zinc-100 hover:bg-zinc-700"
+              >
+                Apply
+              </button>
+            </form>
+          ) : (
+            <span
+              className={`text-lg font-semibold tracking-tight text-zinc-100 transition-opacity duration-150 ${
+                centerLabel ? "opacity-100" : "opacity-0"
+              }`}
+            >
+              {centerLabel || "\u00a0"}
+            </span>
+          )}
         </div>
       </div>
     </div>
