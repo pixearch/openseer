@@ -48,6 +48,8 @@ export type EdgeControlContextValue = {
     delta: number,
     fallbackSegmentIndex: number
   ) => void;
+  onEdgeGeometryDragStart: () => void;
+  onEdgeGeometryDragEnd: () => void;
 };
 
 export const EdgeControlContext = createContext<EdgeControlContextValue | null>(null);
@@ -174,6 +176,7 @@ function OpenSeerFlowEdgeInner(props: Props) {
       const s = snapFlowPosition(p.x, p.y, ctx.snapToGrid, ctx.snapGrid[0], ctx.snapGrid[1]);
       const pointId = ctx.addControlPointAtFlow(id, s.x, s.y);
       ctx.setSelectedControlPoint({ edgeId: id, pointId });
+      ctx.onEdgeGeometryDragStart();
       dragRef.current = { pointId, pointerId: e.pointerId, edgeId: id };
       setDraggingPointId(pointId);
 
@@ -189,6 +192,7 @@ function OpenSeerFlowEdgeInner(props: Props) {
         if (!cur || cur.pointerId !== ev.pointerId) return;
         dragRef.current = null;
         setDraggingPointId(null);
+        ctx.onEdgeGeometryDragEnd();
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onUp);
@@ -206,6 +210,7 @@ function OpenSeerFlowEdgeInner(props: Props) {
       e.preventDefault();
       e.stopPropagation();
       ctx.setSelectedControlPoint({ edgeId: id, pointId });
+      ctx.onEdgeGeometryDragStart();
       dragRef.current = { pointId, pointerId: e.pointerId, edgeId: id };
       setDraggingPointId(pointId);
 
@@ -221,6 +226,7 @@ function OpenSeerFlowEdgeInner(props: Props) {
         if (!cur || cur.pointerId !== ev.pointerId) return;
         dragRef.current = null;
         setDraggingPointId(null);
+        ctx.onEdgeGeometryDragEnd();
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onUp);
@@ -239,6 +245,7 @@ function OpenSeerFlowEdgeInner(props: Props) {
       if (!ctx) return;
       e.preventDefault();
       e.stopPropagation();
+      ctx.onEdgeGeometryDragStart();
       const target = e.currentTarget as SVGLineElement;
       target.setPointerCapture(e.pointerId);
       let last = ctx.screenToFlowPosition({ x: e.clientX, y: e.clientY });
@@ -252,6 +259,7 @@ function OpenSeerFlowEdgeInner(props: Props) {
       const onUp = (ev: PointerEvent) => {
         if (ev.pointerId !== e.pointerId) return;
         target.releasePointerCapture(e.pointerId);
+        ctx.onEdgeGeometryDragEnd();
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onUp);
