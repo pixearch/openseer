@@ -20,6 +20,7 @@ export const OPEN_SEER_NODE_TYPES = [
   "frame",
   "group",
   "hub",
+  "circle",
 ] as const;
 
 export type OpenSeerNodeType = (typeof OPEN_SEER_NODE_TYPES)[number];
@@ -33,6 +34,7 @@ export const GRAPH_WORKSPACE_NODE_TYPE_LIST: OpenSeerNodeType[] = [
   "document",
   "group",
   "hub",
+  "circle",
 ];
 
 export const OPEN_SEER_STATUSES = [
@@ -113,6 +115,11 @@ export interface OpenSeerNodeData {
 
   /** Hub node: regular polygon side count (3–16), default 6 */
   hubSides?: number;
+
+  /** Circle node: number of evenly spaced connection points (1–24), 360/n degrees apart, default 1 */
+  circlePointCount?: number;
+  /** Circle node: rotation in degrees, 0 at 12 o’clock; persisted */
+  circleRotationDeg?: number;
 
   /** Custom header strip color (`hsl(H S% L%)`); independent from body */
   styleHeaderColor?: string;

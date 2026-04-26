@@ -41,8 +41,19 @@ const inputClass =
 
 const textareaClass = `${inputClass} min-h-[72px] resize-y font-mono text-xs leading-relaxed`;
 
+function circleRotationInspectorValue(deg: unknown): number {
+  const v = typeof deg === "number" && Number.isFinite(deg) ? deg : 0;
+  return ((v % 360) + 360) % 360;
+}
+
 function inspectorShowsBodyTypography(nt: OpenSeerNodeType): boolean {
-  return nt !== "hub" && nt !== "image" && nt !== "video" && nt !== "document";
+  return (
+    nt !== "hub" &&
+    nt !== "circle" &&
+    nt !== "image" &&
+    nt !== "video" &&
+    nt !== "document"
+  );
 }
 
 function InspectorNodeTypographySection({
@@ -490,6 +501,22 @@ function InspectorNodeEditor({
     };
   }, [draft.videoUrl, draft.nodeType, id, onPatchNode]);
 
+  useEffect(() => {
+    if (node.data.nodeType !== "circle") return;
+    const r = node.data.circleRotationDeg ?? 0;
+    const c = node.data.circlePointCount ?? 1;
+    setDraft((d) => {
+      if (d.nodeType !== "circle") return d;
+      if (d.circleRotationDeg === r && d.circlePointCount === c) return d;
+      return { ...d, circleRotationDeg: r, circlePointCount: c };
+    });
+  }, [
+    node.data.circlePointCount,
+    node.data.circleRotationDeg,
+    node.data.nodeType,
+    node.id,
+  ]);
+
   return (
     <aside className="flex h-full w-[340px] shrink-0 flex-col border-l border-zinc-800 bg-zinc-950/95">
       <div className="border-b border-zinc-800 px-4 py-3">
@@ -508,7 +535,9 @@ function InspectorNodeEditor({
                       ? "Document"
                       : draft.nodeType === "hub"
                         ? "Hub"
-                        : draft.nodeType}
+                        : draft.nodeType === "circle"
+                          ? "Circle"
+                          : draft.nodeType}
         </h2>
         <p className="mt-0.5 truncate text-xs text-zinc-500" title={draft.title}>
           {draft.title}
@@ -523,6 +552,42 @@ function InspectorNodeEditor({
           />
         </Field>
         <InspectorNodeTypographySection draft={draft} patchImmediate={patchImmediate} />
+        {draft.nodeType === "circle" ? (
+          <Field label="Rotation">
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={0}
+                max={360}
+                step={0.1}
+                className="min-w-0 flex-1 accent-cyan-500"
+                value={circleRotationInspectorValue(draft.circleRotationDeg)}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (!Number.isFinite(n)) return;
+                  const norm = ((n % 360) + 360) % 360;
+                  patchImmediate({ circleRotationDeg: norm });
+                }}
+              />
+              <input
+                className="w-[4.5rem] rounded border border-zinc-700 bg-zinc-900/80 px-1.5 py-1 text-right text-xs tabular-nums text-zinc-100"
+                type="number"
+                min={0}
+                max={360}
+                step={0.1}
+                value={circleRotationInspectorValue(draft.circleRotationDeg)}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === "" || raw === "-") return;
+                  const n = Number(raw);
+                  if (!Number.isFinite(n)) return;
+                  const norm = ((n % 360) + 360) % 360;
+                  patchImmediate({ circleRotationDeg: norm });
+                }}
+              />
+            </div>
+          </Field>
+        ) : null}
         {draft.nodeType !== "code" ? (
           <Field label="Short description">
             <textarea

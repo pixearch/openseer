@@ -20,6 +20,7 @@ import {
   type CSSProperties,
   type DragEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -30,7 +31,7 @@ import {
 } from "@/lib/default-node";
 import { FRAME_HEADER_RESERVE_PX } from "@/lib/graph/frame-chrome";
 import { CodeEditorTextarea } from "@/components/openseer/CodeEditorTextarea";
-import { useShowNodeTypeHeading } from "@/components/openseer/graph-workspace-ui-context";
+import { useGridSnapEnabled, useShowNodeTypeHeading } from "@/components/openseer/graph-workspace-ui-context";
 import { documentPreviewMeta, openDocumentUrl } from "@/lib/document-open";
 import { copyAllCodeBlocks, newCodeBlockId, normalizeCodeBlocksForDisplay } from "@/lib/code-blocks";
 import {
@@ -51,10 +52,33 @@ import { parseYoutubeVideoId, youtubeThumbnailUrl } from "@/lib/youtube";
 
 const HUB_SIDES_MIN = 3;
 const HUB_SIDES_MAX = 16;
+const CIRCLE_POINT_MIN = 1;
+const CIRCLE_POINT_MAX = 24;
 
 function clampHubSides(raw: unknown): number {
   const n = typeof raw === "number" && Number.isFinite(raw) ? Math.round(raw) : 6;
   return Math.min(HUB_SIDES_MAX, Math.max(HUB_SIDES_MIN, n));
+}
+
+function clampCirclePointCount(raw: unknown): number {
+  const n = typeof raw === "number" && Number.isFinite(raw) ? Math.round(raw) : 1;
+  return Math.min(CIRCLE_POINT_MAX, Math.max(CIRCLE_POINT_MIN, n));
+}
+
+function normalizeRotationDeg(raw: number): number {
+  if (!Number.isFinite(raw)) return 0;
+  const x = ((raw % 360) + 360) % 360;
+  return x;
+}
+
+function applyCirclePointerRotation(deg: number, gridSnapEnabled: boolean, shift: boolean): number {
+  if (shift) {
+    return normalizeRotationDeg(Math.round(deg));
+  }
+  if (gridSnapEnabled) {
+    return normalizeRotationDeg(Math.round(deg / 15) * 15);
+  }
+  return normalizeRotationDeg(deg);
 }
 
 function hubGeometry(sides: number, bw: number, bh: number) {
@@ -316,8 +340,9 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   const [lightbox, setLightbox] = useState(false);
   const [videoLightbox, setVideoLightbox] = useState(false);
   const [imgCtxMenu, setImgCtxMenu] = useState<{ clientX: number; clientY: number } | null>(null);
-  const { setNodes } = useReactFlow();
+  const { setNodes, getNode, screenToFlowPosition } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
+  const gridSnapEnabled = useGridSnapEnabled();
   const showTypeHeading = useShowNodeTypeHeading();
   const fileRef = useRef<HTMLInputElement>(null);
   const videoFileRef = useRef<HTMLInputElement>(null);
@@ -382,11 +407,17 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
   );
 
   const hubRootRef = useRef<HTMLDivElement>(null);
+  const circleRootRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
     if (data.nodeType !== "hub") return;
     updateNodeInternals(id);
   }, [data.hubSides, data.nodeType, id, updateNodeInternals, w, h]);
+
+  useLayoutEffect(() => {
+    if (data.nodeType !== "circle") return;
+    updateNodeInternals(id);
+  }, [data.nodeType, data.circlePointCount, data.circleRotationDeg, id, updateNodeInternals, w, h]);
 
   useEffect(() => {
     if (data.nodeType !== "hub") return;
@@ -410,6 +441,65 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, [data.nodeType, id, selected, setNodes]);
+
+  useEffect(() => {
+    if (data.nodeType !== "circle") return;
+    const el = circleRootRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey || !selected) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const dir = e.deltaY < 0 ? 1 : -1;
+      setNodes((nodes) =>
+        nodes.map((n) => {
+          if (n.id !== id || n.data.nodeType !== "circle") return n;
+          const cur = clampCirclePointCount(n.data.circlePointCount);
+          const next = Math.min(CIRCLE_POINT_MAX, Math.max(CIRCLE_POINT_MIN, cur + dir));
+          if (next === cur) return n;
+          return { ...n, data: { ...n.data, circlePointCount: next } };
+        })
+      );
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [data.nodeType, id, selected, setNodes]);
+
+  const onCircleRotationPointerDown = useCallback(
+    (e: ReactPointerEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const onMove = (pe: PointerEvent) => {
+        const node = getNode(id);
+        if (!node) return;
+        const bw = typeof node.width === "number" && node.width > 0 ? node.width : NODE_STANDARD_WIDTH;
+        const bh = typeof node.height === "number" && node.height > 0 ? node.height : NODE_STANDARD_HEIGHT;
+        const cx = node.position.x + bw / 2;
+        const cy = node.position.y + bh / 2;
+        const flow = screenToFlowPosition({ x: pe.clientX, y: pe.clientY });
+        const angRad = Math.atan2(flow.y - cy, flow.x - cx);
+        const angDeg = (angRad * 180) / Math.PI;
+        const nextRaw = (angDeg + 90 + 360) % 360;
+        const next = applyCirclePointerRotation(nextRaw, gridSnapEnabled, pe.shiftKey);
+        setNodes((nodes) =>
+          nodes.map((n) => {
+            if (n.id !== id || n.data.nodeType !== "circle") return n;
+            return { ...n, data: { ...n.data, circleRotationDeg: next } };
+          })
+        );
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        updateNodeInternals(id);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    },
+    [getNode, gridSnapEnabled, id, screenToFlowPosition, setNodes, updateNodeInternals]
+  );
 
   const maybeAutofillYoutubeMeta = useCallback(
     (videoUrl: string) => {
@@ -622,6 +712,119 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
             </span>
           );
         })}
+      </div>
+    );
+  }
+
+  if (data.nodeType === "circle") {
+    const bw = w ?? NODE_STANDARD_WIDTH;
+    const bh = h ?? NODE_STANDARD_HEIGHT;
+    const nPts = clampCirclePointCount(data.circlePointCount);
+    const rot = normalizeRotationDeg(
+      typeof data.circleRotationDeg === "number" && Number.isFinite(data.circleRotationDeg)
+        ? data.circleRotationDeg
+        : 0
+    );
+    const { verts } = hubGeometry(nPts, bw, bh);
+    const cx = bw / 2;
+    const cy = bh / 2;
+    const rVis =
+      verts.length > 0
+        ? Math.hypot(verts[0].x - cx, verts[0].y - cy)
+        : Math.max(8, Math.min(bw, bh) / 2 - 10);
+
+    return (
+      <div
+        ref={circleRootRef}
+        className={[
+          "relative",
+          selected ? "ring-1 ring-sky-500/80 ring-offset-2 ring-offset-[#0c0c0e]" : "",
+        ].join(" ")}
+        style={{ width: bw, height: bh }}
+      >
+        {resizerStandard}
+        <div
+          className="absolute inset-0 z-0 will-change-transform"
+          style={{ transform: `rotate(${rot}deg)`, transformOrigin: "50% 50%" }}
+        >
+          <svg
+            width={bw}
+            height={bh}
+            className="pointer-events-none absolute inset-0 z-0 block"
+            aria-hidden
+          >
+            <circle
+              cx={cx}
+              cy={cy}
+              r={rVis}
+              fill={chrome.hubFill ?? "rgb(24 24 27 / 0.95)"}
+              stroke="rgb(34 211 238 / 0.5)"
+              strokeWidth={1.5}
+            />
+          </svg>
+          <div className="pointer-events-none absolute inset-0 z-[1] flex flex-col items-center justify-center px-8 text-center">
+            {showTypeHeading ? (
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-cyan-400/90">
+                {typeLabel}
+              </span>
+            ) : null}
+            <div
+              className="mt-1 line-clamp-2 text-sm font-semibold text-zinc-100"
+              style={resolveHeaderTitleStyle(data)}
+            >
+              {data.title}
+            </div>
+          </div>
+          {verts.map((v, i) => {
+            const st = hubHandleStyle((v.x / bw) * 100, (v.y / bh) * 100);
+            const hp = hubHandleCardinalPosition(v, cx, cy);
+            return (
+              <span key={i} className="contents">
+                <Handle
+                  type="target"
+                  id={`circle-${i}-t`}
+                  position={hp}
+                  className={QUAD_HANDLE_CLASS}
+                  style={st}
+                >
+                  <QuadHandleFace position={hp} />
+                </Handle>
+                <Handle
+                  type="source"
+                  id={`circle-${i}-s`}
+                  position={hp}
+                  className={QUAD_HANDLE_CLASS}
+                  style={st}
+                >
+                  <QuadHandleFace position={hp} />
+                </Handle>
+              </span>
+            );
+          })}
+          {selected ? (
+            <button
+              type="button"
+              className="nodrag nopan pointer-events-auto absolute left-1/2 z-[4] h-7 w-7 -translate-x-1/2 cursor-grab rounded-full border border-cyan-500/80 bg-zinc-900/95 p-0 text-cyan-300 shadow hover:bg-zinc-800/95 active:cursor-grabbing"
+              style={{ top: -30 }}
+              aria-label="Rotate"
+              onPointerDown={onCircleRotationPointerDown}
+            >
+              <svg
+                className="pointer-events-none mx-auto mt-0.5 h-5 w-5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M3 12a9 9 0 1 0 3-6.7L2 2" />
+                <path d="M2 2h5v5" />
+              </svg>
+            </button>
+          ) : null}
+        </div>
       </div>
     );
   }

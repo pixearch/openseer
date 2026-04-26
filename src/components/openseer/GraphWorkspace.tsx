@@ -35,7 +35,7 @@ import type {
 } from "@xyflow/react";
 import { EdgeControlContext, OpenSeerFlowEdge } from "@/components/openseer/OpenSeerFlowEdge";
 import { GraphSidebar } from "@/components/openseer/GraphSidebar";
-import { ShowNodeTypeHeadingContext } from "@/components/openseer/graph-workspace-ui-context";
+import { GridSnapEnabledContext, ShowNodeTypeHeadingContext } from "@/components/openseer/graph-workspace-ui-context";
 import { InspectorPanel } from "@/components/openseer/InspectorPanel";
 import { OpenSeerNode } from "@/components/openseer/OpenSeerNode";
 import { NodeStyleColorPanel } from "@/components/openseer/NodeStyleColorPanel";
@@ -51,6 +51,12 @@ import {
   NODE_STANDARD_HEIGHT,
   NODE_STANDARD_WIDTH,
 } from "@/lib/default-node";
+import {
+  isExcludedFromChainType,
+  pickQuadrilateralChainHandles,
+  sizeForNewNodeType,
+  sortNodesForChainLayout,
+} from "@/lib/graph/chain-helpers";
 import {
   applyMultiNodeAlign,
   applyMultiNodeDistribute,
@@ -142,6 +148,21 @@ const WORKSPACE_TYPE_SET = new Set<OpenSeerNodeType>(GRAPH_WORKSPACE_NODE_TYPE_L
 
 const SESSION_GRAPH_PANEL_COLLAPSED_KEY = "openseer-graph-panel-collapsed";
 const LOCAL_SHOW_NODE_TYPE_HEADINGS_KEY = "openseer-show-node-type-headings-v1";
+
+const MAX_UNDO = 200;
+
+type GraphDocumentState = {
+  nodes: Node<OpenSeerNodeData>[];
+  edges: Edge<OpenSeerEdgeData>[];
+};
+
+function cloneGraphDocument(s: GraphDocumentState): GraphDocumentState {
+  return { nodes: structuredClone(s.nodes), edges: structuredClone(s.edges) };
+}
+
+function sameGraphDocument(a: GraphDocumentState, b: GraphDocumentState): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
 
 /** Max distance (flow coordinates) from pointer to edge path to allow insert-on-drop. */
 const EDGE_INSERT_HIT_FLOW = 36;
@@ -415,6 +436,9 @@ function GraphWorkspaceInner() {
   const [graphPanelCollapsed, setGraphPanelCollapsed] = useState(false);
   const [showNodeTypeHeadings, setShowNodeTypeHeadings] = useState(true);
   const [gridSnapEnabled, setGridSnapEnabled] = useState(false);
+  const [chainMode, setChainMode] = useState(false);
+  const chainSourceIdRef = useRef<string | null>(null);
+  const chainRadialFlowRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuidesState | null>(null);
   const [alignOverlay, setAlignOverlay] = useState<null | "align" | "distribute">(null);
   const [proportionalMoveUi, setProportionalMoveUi] = useState(false);
@@ -455,6 +479,14 @@ function GraphWorkspaceInner() {
     docRef.current = doc;
   }, [doc]);
 
+  const isApplyingHistoryRef = useRef(false);
+  const undoPastRef = useRef<GraphDocumentState[]>([]);
+  const undoFutureRef = useRef<GraphDocumentState[]>([]);
+  const [graphStackUi, setGraphStackUi] = useState({ past: 0, future: 0 });
+  const preNodePositionDocRef = useRef<GraphDocumentState | null>(null);
+  const preNodeDimensionDocRef = useRef<GraphDocumentState | null>(null);
+  const preEdgeGeometryDocRef = useRef<GraphDocumentState | null>(null);
+
   const groupPathRef = useRef(groupPath);
   useLayoutEffect(() => {
     groupPathRef.current = groupPath;
@@ -483,6 +515,77 @@ function GraphWorkspaceInner() {
 
   const alignOverlayContainerRef = useRef<HTMLDivElement>(null);
 
+  const clearGraphUndoHistory = useCallback(() => {
+    undoPastRef.current = [];
+    undoFutureRef.current = [];
+    preNodePositionDocRef.current = null;
+    preNodeDimensionDocRef.current = null;
+    preEdgeGeometryDocRef.current = null;
+    setGraphStackUi({ past: 0, future: 0 });
+  }, []);
+
+  const pushUndoSnapshot = useCallback((d: GraphDocumentState) => {
+    if (isApplyingHistoryRef.current) return;
+    const next = [...undoPastRef.current, cloneGraphDocument(d)];
+    undoPastRef.current =
+      next.length > MAX_UNDO ? next.slice(next.length - MAX_UNDO) : next;
+    undoFutureRef.current = [];
+    setGraphStackUi({ past: undoPastRef.current.length, future: 0 });
+  }, []);
+
+  const performUndo = useCallback(() => {
+    if (undoPastRef.current.length === 0) return;
+    isApplyingHistoryRef.current = true;
+    const current = cloneGraphDocument(docRef.current);
+    const prev = undoPastRef.current.pop()!;
+    undoFutureRef.current = [...undoFutureRef.current, current];
+    setDoc(cloneGraphDocument(prev));
+    setGraphStackUi({
+      past: undoPastRef.current.length,
+      future: undoFutureRef.current.length,
+    });
+    requestAnimationFrame(() => {
+      isApplyingHistoryRef.current = false;
+    });
+  }, []);
+
+  const performRedo = useCallback(() => {
+    if (undoFutureRef.current.length === 0) return;
+    isApplyingHistoryRef.current = true;
+    const current = cloneGraphDocument(docRef.current);
+    const nxt = undoFutureRef.current.pop()!;
+    const stack = [...undoPastRef.current, current];
+    undoPastRef.current =
+      stack.length > MAX_UNDO ? stack.slice(stack.length - MAX_UNDO) : stack;
+    setDoc(cloneGraphDocument(nxt));
+    setGraphStackUi({
+      past: undoPastRef.current.length,
+      future: undoFutureRef.current.length,
+    });
+    requestAnimationFrame(() => {
+      isApplyingHistoryRef.current = false;
+    });
+  }, []);
+
+  const onEdgeGeometryDragStart = useCallback(() => {
+    if (isApplyingHistoryRef.current) return;
+    preEdgeGeometryDocRef.current = cloneGraphDocument(docRef.current);
+  }, []);
+
+  const onEdgeGeometryDragEnd = useCallback(() => {
+    const pre = preEdgeGeometryDocRef.current;
+    preEdgeGeometryDocRef.current = null;
+    if (pre == null || isApplyingHistoryRef.current) return;
+    if (sameGraphDocument(pre, docRef.current)) return;
+    pushUndoSnapshot(pre);
+  }, [pushUndoSnapshot]);
+
+  useLayoutEffect(() => {
+    if (isApplyingHistoryRef.current) return;
+    if (controlPointGrab) onEdgeGeometryDragStart();
+    else onEdgeGeometryDragEnd();
+  }, [controlPointGrab, onEdgeGeometryDragStart, onEdgeGeometryDragEnd]);
+
   useEffect(() => {
     if (!alignOverlay) return;
     alignOverlayContainerRef.current?.focus();
@@ -496,11 +599,13 @@ function GraphWorkspaceInner() {
     return () => window.removeEventListener("keyup", onKeyUp);
   }, []);
 
-  const applyAlignOverlayChoice = useCallback((dir: AlignDirection, mode: "align" | "distribute") => {
+  const applyAlignOverlayChoice = useCallback(
+    (dir: AlignDirection, mode: "align" | "distribute") => {
     setAlignOverlay(null);
     setDoc((d) => {
       const ids = selectionRef.current.multiNodeIds;
       if (!ids || ids.length < 2) return d;
+      if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
       const path = groupPathRef.current;
       const v = getViewGraph(d.nodes, d.edges, path);
       const raw =
@@ -515,7 +620,9 @@ function GraphWorkspaceInner() {
         edges: d.edges,
       };
     });
-  }, []);
+  },
+  [pushUndoSnapshot]
+  );
 
   useEffect(() => {
     if (!alignOverlay) return;
@@ -602,10 +709,11 @@ function GraphWorkspaceInner() {
         setGraphMeta({ id: SEED_GRAPH_ID, name: SEED_GRAPH_NAME });
         saveGraphDocument(documentFromState(SEED_GRAPH_NAME, SEED_GRAPH_ID, nodes, edges));
       }
+      clearGraphUndoHistory();
       setReady(true);
     });
     return () => window.cancelAnimationFrame(id);
-  }, []);
+  }, [clearGraphUndoHistory]);
 
   useEffect(() => {
     const id = window.requestAnimationFrame(() => {
@@ -740,7 +848,22 @@ function GraphWorkspaceInner() {
       if (ctxMenu) return;
       if (alignOverlayRef.current) return;
 
+      if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z") && !e.altKey) {
+        if (textEditOpenRef.current || codeEditOpenRef.current) return;
+        if (!graphPointerInside.current) return;
+        e.preventDefault();
+        if (e.shiftKey) performRedo();
+        else performUndo();
+        return;
+      }
+
       if (e.key === "Escape") {
+        if (chainMode) {
+          e.preventDefault();
+          setChainMode(false);
+          chainSourceIdRef.current = null;
+          return;
+        }
         if (proportionalLayoutRef.current) {
           e.preventDefault();
           proportionalLayoutRef.current = null;
@@ -765,6 +888,68 @@ function GraphWorkspaceInner() {
       }
 
       if (!graphPointerInside.current) return;
+
+      if (k === "c" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (e.repeat) return;
+        if (textEditOpenRef.current || codeEditOpenRef.current) return;
+        e.preventDefault();
+        setChainMode((m) => !m);
+        chainSourceIdRef.current = null;
+        return;
+      }
+
+      if (e.key === "Enter" && chainMode) {
+        const m = selectionRef.current.multiNodeIds;
+        if (m && m.length >= 2) {
+          e.preventDefault();
+          const d0 = docRef.current;
+          const path0 = groupPathRef.current;
+          const v0 = getViewGraph(d0.nodes, d0.edges, path0);
+          const pickNodes = m
+            .map((id) => v0.nodes.find((n) => n.id === id))
+            .filter((n): n is Node<OpenSeerNodeData> => n != null);
+          const sorted = sortNodesForChainLayout(pickNodes);
+          if (sorted.length >= 2) {
+            setDoc((d) => {
+              if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
+              const gPath = groupPathRef.current;
+              const v = getViewGraph(d.nodes, d.edges, gPath);
+              let ne = v.edges;
+              for (let i = 0; i < sorted.length - 1; i++) {
+                const a = sorted[i];
+                const b = sorted[i + 1];
+                if (ne.some((ed) => ed.source === a.id && ed.target === b.id)) continue;
+                if (isExcludedFromChainType(a.data.nodeType) || isExcludedFromChainType(b.data.nodeType)) {
+                  continue;
+                }
+                const h = pickQuadrilateralChainHandles(a.id, b.id, a, b);
+                const eid = `e-${a.id}-${b.id}-${crypto.randomUUID().slice(0, 8)}`;
+                const newEdge: Edge<OpenSeerEdgeData> = {
+                  id: eid,
+                  source: a.id,
+                  target: b.id,
+                  sourceHandle: h.sourceHandle,
+                  targetHandle: h.targetHandle,
+                  type: "openSeerEdge",
+                  markerEnd: defaultEdgeOptions.markerEnd,
+                  style: defaultEdgeOptions.style,
+                  selectable: defaultEdgeOptions.selectable,
+                  interactionWidth: defaultEdgeOptions.interactionWidth,
+                  label: "relates_to",
+                  data: { label: "relates_to", relationshipType: "relates_to" },
+                };
+                ne = addEdge(newEdge, ne);
+              }
+              if (gPath.length === 0) return { nodes: d.nodes, edges: ne };
+              return {
+                nodes: patchNestedGraph(d.nodes, gPath, v.nodes, ne),
+                edges: d.edges,
+              };
+            });
+          }
+        }
+        return;
+      }
 
       if (e.code === "KeyG") {
         if (controlPointGrabRef.current) {
@@ -801,6 +986,7 @@ function GraphWorkspaceInner() {
         if (!cp) return;
         e.preventDefault();
         setDoc((doc) => {
+          if (!isApplyingHistoryRef.current) pushUndoSnapshot(doc);
           const gPath = groupPathRef.current;
           const v = getViewGraph(doc.nodes, doc.edges, gPath);
           const ne = v.edges.map((edge) => {
@@ -844,6 +1030,7 @@ function GraphWorkspaceInner() {
         if (v0.edges.some((ed) => ed.source === A0 && ed.target === C0)) return;
         e.preventDefault();
         setDoc((d) => {
+          if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
           const path = groupPathRef.current;
           const v = getViewGraph(d.nodes, d.edges, path);
           const incoming = v.edges.filter((x) => x.target === selId);
@@ -957,6 +1144,7 @@ function GraphWorkspaceInner() {
         e.preventDefault();
         const exact = e.shiftKey;
         setDoc((d) => {
+          if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
           const path = groupPathRef.current;
           const v = getViewGraph(d.nodes, d.edges, path);
           const source = v.nodes.find((n) => n.id === sourceId);
@@ -1011,7 +1199,16 @@ function GraphWorkspaceInner() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ctxMenu, fitView, focusMode, screenToFlowPosition]);
+  }, [
+    ctxMenu,
+    fitView,
+    focusMode,
+    chainMode,
+    screenToFlowPosition,
+    performUndo,
+    performRedo,
+    pushUndoSnapshot,
+  ]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1067,6 +1264,65 @@ function GraphWorkspaceInner() {
   const onNodesChange = useCallback(
     (changes: NodeChange<Node<OpenSeerNodeData>>[]) => {
       setDoc((d) => {
+        if (!isApplyingHistoryRef.current) {
+          const onlyNodeSelect =
+            changes.length > 0 && changes.every((c) => c.type === "select");
+          if (!onlyNodeSelect) {
+            const hasStructural = changes.some(
+              (c) => c.type === "add" || c.type === "remove" || c.type === "replace"
+            );
+            if (hasStructural) {
+              preNodePositionDocRef.current = null;
+              preNodeDimensionDocRef.current = null;
+              pushUndoSnapshot(d);
+            } else {
+              const posChanges = changes.filter((c) => c.type === "position");
+              const dimChanges = changes.filter((c) => c.type === "dimensions");
+              for (const c of dimChanges) {
+                if (c.resizing === true && preNodeDimensionDocRef.current == null) {
+                  preNodeDimensionDocRef.current = cloneGraphDocument(d);
+                }
+              }
+              for (const c of posChanges) {
+                if (c.dragging === true && preNodePositionDocRef.current == null) {
+                  preNodePositionDocRef.current = cloneGraphDocument(d);
+                }
+              }
+              const dimEnd = dimChanges.some((c) => c.resizing === false);
+              const posEnd = posChanges.some((c) => c.dragging === false);
+              const posNudge = posChanges.some(
+                (c) => c.dragging !== true && c.dragging !== false
+              );
+              // Only commit resize undo when we saw resizing===true (pre captured). Otherwise
+              // dimensions batches with resizing===false (e.g. post-drag measure) must not run
+              // before posEnd or they would push the current doc and make the first Ctrl+Z a no-op.
+              if (dimEnd && preNodeDimensionDocRef.current != null) {
+                pushUndoSnapshot(preNodeDimensionDocRef.current);
+                preNodeDimensionDocRef.current = null;
+                preNodePositionDocRef.current = null;
+              } else if (posEnd) {
+                if (preNodePositionDocRef.current != null) {
+                  pushUndoSnapshot(preNodePositionDocRef.current);
+                  preNodePositionDocRef.current = null;
+                } else {
+                  pushUndoSnapshot(d);
+                }
+                preNodeDimensionDocRef.current = null;
+              } else if (posNudge && preNodePositionDocRef.current == null) {
+                preNodeDimensionDocRef.current = null;
+                preNodePositionDocRef.current = null;
+                pushUndoSnapshot(d);
+              } else if (
+                dimChanges.length > 0 &&
+                !dimChanges.some((c) => c.resizing === true) &&
+                preNodeDimensionDocRef.current == null
+              ) {
+                preNodePositionDocRef.current = null;
+              }
+            }
+          }
+        }
+
         const path = groupPathRef.current;
         const v = getViewGraph(d.nodes, d.edges, path);
         let effectiveChanges = changes;
@@ -1128,12 +1384,21 @@ function GraphWorkspaceInner() {
         };
       });
     },
-    []
+    [pushUndoSnapshot]
   );
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange<Edge<OpenSeerEdgeData>>[]) => {
       setDoc((d) => {
+        if (!isApplyingHistoryRef.current) {
+          const onlyEdgeSelect =
+            changes.length > 0 && changes.every((c) => c.type === "select");
+          if (!onlyEdgeSelect) {
+            preNodePositionDocRef.current = null;
+            preNodeDimensionDocRef.current = null;
+            pushUndoSnapshot(d);
+          }
+        }
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const ne = applyEdgeChanges(changes, v.edges);
         if (groupPath.length === 0) return { nodes: d.nodes, edges: ne };
@@ -1143,7 +1408,7 @@ function GraphWorkspaceInner() {
         };
       });
     },
-    [groupPath]
+    [groupPath, pushUndoSnapshot]
   );
 
   const onConnect = useCallback(
@@ -1156,6 +1421,7 @@ function GraphWorkspaceInner() {
         data: { label: "relates_to", relationshipType: "relates_to" },
       };
       setDoc((d) => {
+        if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const ne = addEdge(next, v.edges);
         if (groupPath.length === 0) return { nodes: d.nodes, edges: ne };
@@ -1165,7 +1431,7 @@ function GraphWorkspaceInner() {
         };
       });
     },
-    [groupPath]
+    [groupPath, pushUndoSnapshot]
   );
 
   const onSelectionChange = useCallback(
@@ -1212,6 +1478,80 @@ function GraphWorkspaceInner() {
     },
     []
   );
+
+  const selectionMultiKey = selection.multiNodeIds?.join("\0") ?? "";
+
+  useEffect(() => {
+    if (!chainMode) {
+      return;
+    }
+    if (selectionMultiKey.length > 0) {
+      chainSourceIdRef.current = null;
+      return;
+    }
+    const id = selection.nodeId;
+    if (!id) {
+      chainSourceIdRef.current = null;
+      return;
+    }
+    const d = docRef.current;
+    const gPath = groupPathRef.current;
+    const v = getViewGraph(d.nodes, d.edges, gPath);
+    const node = v.nodes.find((n) => n.id === id);
+    if (!node) {
+      return;
+    }
+    if (isExcludedFromChainType(node.data.nodeType)) {
+      return;
+    }
+    const from = chainSourceIdRef.current;
+    if (from === null) {
+      chainSourceIdRef.current = id;
+      return;
+    }
+    if (from === id) {
+      return;
+    }
+    const sNode = v.nodes.find((n) => n.id === from);
+    if (!sNode || isExcludedFromChainType(sNode.data.nodeType)) {
+      return;
+    }
+    if (v.edges.some((e) => e.source === from && e.target === id)) {
+      chainSourceIdRef.current = id;
+      return;
+    }
+    const h = pickQuadrilateralChainHandles(from, id, sNode, node);
+    const eid = `e-${from}-${id}-${crypto.randomUUID().slice(0, 8)}`;
+    const newEdge: Edge<OpenSeerEdgeData> = {
+      id: eid,
+      source: from,
+      target: id,
+      sourceHandle: h.sourceHandle,
+      targetHandle: h.targetHandle,
+      type: "openSeerEdge",
+      markerEnd: defaultEdgeOptions.markerEnd,
+      style: defaultEdgeOptions.style,
+      selectable: defaultEdgeOptions.selectable,
+      interactionWidth: defaultEdgeOptions.interactionWidth,
+      label: "relates_to",
+      data: { label: "relates_to", relationshipType: "relates_to" },
+    };
+    setDoc((doc) => {
+      if (!isApplyingHistoryRef.current) pushUndoSnapshot(doc);
+      const path = groupPathRef.current;
+      const v2 = getViewGraph(doc.nodes, doc.edges, path);
+      if (v2.edges.some((e) => e.source === from && e.target === id)) {
+        return doc;
+      }
+      const ne = addEdge(newEdge, v2.edges);
+      if (path.length === 0) return { nodes: doc.nodes, edges: ne };
+      return {
+        nodes: patchNestedGraph(doc.nodes, path, v2.nodes, ne),
+        edges: doc.edges,
+      };
+    });
+    chainSourceIdRef.current = id;
+  }, [chainMode, selection.nodeId, selectionMultiKey, pushUndoSnapshot, setDoc]);
 
   const onNodesDelete = useCallback((deleted: Node<OpenSeerNodeData>[]) => {
     if (textEditNodeId && deleted.some((n) => n.id === textEditNodeId)) {
@@ -1586,6 +1926,7 @@ function GraphWorkspaceInner() {
       const normalized: Partial<OpenSeerNodeData> =
         patch.tags !== undefined ? { ...patch, tags: normalizeStoredTags(patch.tags) } : patch;
       setDoc((d) => {
+        if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const nn = v.nodes.map((n) =>
           n.id === id ? { ...n, data: { ...n.data, ...normalized } } : n
@@ -1597,7 +1938,7 @@ function GraphWorkspaceInner() {
         };
       });
     },
-    [groupPath]
+    [groupPath, pushUndoSnapshot]
   );
 
   const onPatchNodes = useCallback(
@@ -1606,6 +1947,7 @@ function GraphWorkspaceInner() {
       const normalized: Partial<OpenSeerNodeData> =
         patch.tags !== undefined ? { ...patch, tags: normalizeStoredTags(patch.tags) } : patch;
       setDoc((d) => {
+        if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const nn = v.nodes.map((n) =>
           set.has(n.id) ? { ...n, data: { ...n.data, ...normalized } } : n
@@ -1617,12 +1959,13 @@ function GraphWorkspaceInner() {
         };
       });
     },
-    [groupPath]
+    [groupPath, pushUndoSnapshot]
   );
 
   const onPatchEdge = useCallback(
     (id: string, next: OpenSeerEdgeData) => {
       setDoc((d) => {
+        if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
         const { nodeLookup, connectionMode } = store.getState();
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const ne = v.edges.map((e) => {
@@ -1675,7 +2018,7 @@ function GraphWorkspaceInner() {
         };
       });
     },
-    [groupPath, store]
+    [groupPath, store, pushUndoSnapshot]
   );
 
   const addControlPointAtFlow = useCallback(
@@ -1755,6 +2098,7 @@ function GraphWorkspaceInner() {
         const returnId = newBend?.id ?? pointId;
 
         setDoc((doc) => {
+          if (!isApplyingHistoryRef.current) pushUndoSnapshot(doc);
           const gPath = groupPathRef.current;
           const v2 = getViewGraph(doc.nodes, doc.edges, gPath);
           const ne = v2.edges.map((e) => {
@@ -1794,6 +2138,7 @@ function GraphWorkspaceInner() {
       const sorted = sortControlPointsAlongPath(baselineD, [...existing, nextPt]);
 
       setDoc((doc) => {
+        if (!isApplyingHistoryRef.current) pushUndoSnapshot(doc);
         const gPath = groupPathRef.current;
         const v2 = getViewGraph(doc.nodes, doc.edges, gPath);
         const ne = v2.edges.map((e) => {
@@ -1816,7 +2161,7 @@ function GraphWorkspaceInner() {
       });
       return pointId;
     },
-    [store, gridSnapEnabled]
+    [store, gridSnapEnabled, pushUndoSnapshot]
   );
 
   const updateControlPointPosition = useCallback(
@@ -2108,6 +2453,7 @@ function GraphWorkspaceInner() {
       if (!cp || edges.length === 0) return { nodes, edges };
       if (!edges.some((e) => e.id === cp.edgeId)) return { nodes, edges };
       setDoc((doc) => {
+        if (!isApplyingHistoryRef.current) pushUndoSnapshot(doc);
         const gPath = groupPathRef.current;
         const v = getViewGraph(doc.nodes, doc.edges, gPath);
         const ne = v.edges.map((e) => {
@@ -2144,7 +2490,7 @@ function GraphWorkspaceInner() {
       setSelectedControlPoint(null);
       return { nodes, edges: edges.filter((e) => e.id !== cp.edgeId) };
     },
-    []
+    [pushUndoSnapshot]
   );
 
   const edgeControlApi = useMemo(
@@ -2159,6 +2505,8 @@ function GraphWorkspaceInner() {
       hoveredEdgeId,
       edgeAltInsertPreview,
       applyOrthogonalSegmentDrag,
+      onEdgeGeometryDragStart,
+      onEdgeGeometryDragEnd,
     }),
     [
       gridSnapEnabled,
@@ -2169,6 +2517,8 @@ function GraphWorkspaceInner() {
       hoveredEdgeId,
       edgeAltInsertPreview,
       applyOrthogonalSegmentDrag,
+      onEdgeGeometryDragStart,
+      onEdgeGeometryDragEnd,
     ]
   );
 
@@ -2177,6 +2527,7 @@ function GraphWorkspaceInner() {
       setTextEditNodeId((tid) => (tid === id ? null : tid));
       setCodeEditNodeId((cid) => (cid === id ? null : cid));
       setDoc((d) => {
+        if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const nn = v.nodes.filter((n) => n.id !== id);
         const ne = v.edges.filter((e) => e.source !== id && e.target !== id);
@@ -2188,12 +2539,13 @@ function GraphWorkspaceInner() {
       });
       setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
     },
-    [groupPath]
+    [groupPath, pushUndoSnapshot]
   );
 
   const onDeleteEdge = useCallback(
     (id: string) => {
       setDoc((d) => {
+        if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const ne = v.edges.filter((e) => e.id !== id);
         if (groupPath.length === 0) return { nodes: d.nodes, edges: ne };
@@ -2205,7 +2557,7 @@ function GraphWorkspaceInner() {
       setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
       setSelectedControlPoint(null);
     },
-    [groupPath]
+    [groupPath, pushUndoSnapshot]
   );
 
   const onToggleType = useCallback((t: OpenSeerNodeType) => {
@@ -2226,22 +2578,24 @@ function GraphWorkspaceInner() {
     const clamped = clampFrameChildrenEverywhere(seed.nodes);
     const { nodes, edges } = sanitizeHubHandlesInDoc(clamped, seed.edges);
     setDoc({ nodes, edges });
+    clearGraphUndoHistory();
     setGraphMeta({ id: SEED_GRAPH_ID, name: SEED_GRAPH_NAME });
     setGroupPath([]);
     setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
     setSelectedControlPoint(null);
     initialFitDone.current = false;
     window.setTimeout(() => fitView({ padding: 0.12, maxZoom: 1.15, duration: 200 }), 60);
-  }, [fitView]);
+  }, [fitView, clearGraphUndoHistory]);
 
   const onNewBlank = useCallback(() => {
     const id = crypto.randomUUID();
     setDoc({ nodes: [], edges: [] });
+    clearGraphUndoHistory();
     setGraphMeta({ id, name: "Untitled graph" });
     setGroupPath([]);
     setSelection({ nodeId: null, edgeId: null, multiNodeIds: null });
     setSelectedControlPoint(null);
-  }, []);
+  }, [clearGraphUndoHistory]);
 
   const onAddNodeAt = useCallback(
     (nodeType: OpenSeerNodeType, position: { x: number; y: number }) => {
@@ -2251,6 +2605,7 @@ function GraphWorkspaceInner() {
         sel.multiNodeIds?.length ? sel.multiNodeIds : sel.nodeId ? [sel.nodeId] : [];
 
       setDoc((d) => {
+        if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
         const v = getViewGraph(d.nodes, d.edges, groupPath);
         const inView = new Set(v.nodes.map((n) => n.id));
         const sources = selectedIds.filter((sid) => inView.has(sid));
@@ -2293,7 +2648,7 @@ function GraphWorkspaceInner() {
         };
       });
     },
-    [groupPath]
+    [groupPath, pushUndoSnapshot]
   );
 
   const onAddNode = useCallback(
@@ -2306,6 +2661,87 @@ function GraphWorkspaceInner() {
       onAddNodeAt(nodeType, position);
     },
     [screenToFlowPosition, onAddNodeAt]
+  );
+
+  const onChainBatchFromRadial = useCallback(
+    (nodeType: OpenSeerNodeType, count: number, layout: "h" | "v") => {
+      if (isExcludedFromChainType(nodeType) || count < 1) {
+        return;
+      }
+      setDoc((d) => {
+        if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
+        const path = groupPathRef.current;
+        const v = getViewGraph(d.nodes, d.edges, path);
+        const { w, h } = sizeForNewNodeType(nodeType);
+        const isGroup = nodeType === "group";
+        const el = flowAreaRef.current;
+        const rect = el?.getBoundingClientRect();
+        const centerScreen = {
+          x: rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
+          y: rect ? rect.top + rect.height / 2 : window.innerHeight / 2,
+        };
+        const centerFlow = screenToFlowPosition(centerScreen);
+        const fp = lastGraphPointerFlow.current;
+        const r = chainRadialFlowRef.current;
+        const flowX = fp != null && Number.isFinite(fp.x) ? fp.x : (Number.isFinite(r.x) ? r.x : centerFlow.x);
+        const flowY = fp != null && Number.isFinite(fp.y) ? fp.y : (Number.isFinite(r.y) ? r.y : centerFlow.y);
+        const stepX = w + 48;
+        const stepY = h + 40;
+        const newNodes: Node<OpenSeerNodeData>[] = [];
+        for (let i = 0; i < count; i++) {
+          const id = `n-${crypto.randomUUID()}`;
+          const pos =
+            layout === "h"
+              ? {
+                  x: flowX + (i - (count - 1) / 2) * stepX - w / 2,
+                  y: flowY - h / 2,
+                }
+              : {
+                  x: flowX - w / 2,
+                  y: flowY + (i - (count - 1) / 2) * stepY - h / 2,
+                };
+          newNodes.push({
+            id,
+            type: "openSeer" as const,
+            position: pos,
+            data: createEmptyNodeData(nodeType),
+            width: isGroup ? GROUP_STANDARD_WIDTH : NODE_STANDARD_WIDTH,
+            height: isGroup ? GROUP_STANDARD_HEIGHT : NODE_STANDARD_HEIGHT,
+          });
+        }
+        const orderedAll = sortParentsBeforeChildren([...v.nodes, ...newNodes]);
+        let ne = v.edges;
+        for (let i = 0; i < newNodes.length - 1; i++) {
+          const a = newNodes[i]!;
+          const b = newNodes[i + 1]!;
+          const hnd = pickQuadrilateralChainHandles(a.id, b.id, a, b);
+          const eid = `e-${a.id}-${b.id}-${crypto.randomUUID().slice(0, 8)}`;
+          const eNew: Edge<OpenSeerEdgeData> = {
+            id: eid,
+            source: a.id,
+            target: b.id,
+            sourceHandle: hnd.sourceHandle,
+            targetHandle: hnd.targetHandle,
+            type: "openSeerEdge",
+            markerEnd: defaultEdgeOptions.markerEnd,
+            style: defaultEdgeOptions.style,
+            selectable: defaultEdgeOptions.selectable,
+            interactionWidth: defaultEdgeOptions.interactionWidth,
+            label: "relates_to",
+            data: { label: "relates_to", relationshipType: "relates_to" },
+          };
+          ne = addEdge(eNew, ne);
+        }
+        if (path.length === 0) {
+          return { nodes: orderedAll, edges: ne };
+        }
+        return {
+          nodes: patchNestedGraph(d.nodes, path, orderedAll, ne),
+          edges: d.edges,
+        };
+      });
+    },
+    [pushUndoSnapshot, screenToFlowPosition]
   );
 
   const openPaneContextMenu = useCallback(
@@ -2445,6 +2881,7 @@ function GraphWorkspaceInner() {
 
     const B = node.id;
     setDoc((d) => {
+      if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
       const path = groupPathRef.current;
       const v = getViewGraph(d.nodes, d.edges, path);
       const edge = v.edges.find((ed) => ed.id === hoverId);
@@ -2483,7 +2920,7 @@ function GraphWorkspaceInner() {
         edges: d.edges,
       };
     });
-  }, []);
+  }, [pushUndoSnapshot]);
 
   const onSelectionDragStart: SelectionDragHandler<Node<OpenSeerNodeData>> = useCallback(
     (_e, nodes) => {
@@ -2552,6 +2989,7 @@ function GraphWorkspaceInner() {
     const ids = ctxMenu.selectedIds;
     setCtxMenu(null);
     setDoc((d) => {
+      if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
       const v = getViewGraph(d.nodes, d.edges, groupPath);
       const g = groupSelectedNodes(v.nodes, v.edges, ids);
       if (!g) return d;
@@ -2561,13 +2999,14 @@ function GraphWorkspaceInner() {
         edges: d.edges,
       };
     });
-  }, [ctxMenu, groupPath]);
+  }, [ctxMenu, groupPath, pushUndoSnapshot]);
 
   const runUngroupAll = useCallback(() => {
     if (!ctxMenu || ctxMenu.kind !== "nodes") return;
     const frameId = ctxMenu.anchorNodeId;
     setCtxMenu(null);
     setDoc((d) => {
+      if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
       const v = getViewGraph(d.nodes, d.edges, groupPath);
       const u = ungroupFrame(v.nodes, v.edges, frameId);
       if (!u) return d;
@@ -2577,13 +3016,14 @@ function GraphWorkspaceInner() {
         edges: d.edges,
       };
     });
-  }, [ctxMenu, groupPath]);
+  }, [ctxMenu, groupPath, pushUndoSnapshot]);
 
   const runUngroupNode = useCallback(() => {
     if (!ctxMenu || ctxMenu.kind !== "nodes") return;
     const nodeId = ctxMenu.anchorNodeId;
     setCtxMenu(null);
     setDoc((d) => {
+      if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
       const v = getViewGraph(d.nodes, d.edges, groupPath);
       const u = ungroupNodeFromFrame(v.nodes, v.edges, nodeId);
       if (!u) return d;
@@ -2593,7 +3033,7 @@ function GraphWorkspaceInner() {
         edges: d.edges,
       };
     });
-  }, [ctxMenu, groupPath]);
+  }, [ctxMenu, groupPath, pushUndoSnapshot]);
 
   const ctxMenuAnchorNode = useMemo(() => {
     if (!ctxMenu || ctxMenu.kind !== "nodes") return null;
@@ -2608,6 +3048,10 @@ function GraphWorkspaceInner() {
 
   const radialPos =
     ctxMenu?.kind === "pane" ? clampRadialMenuCenter(ctxMenu.clientX, ctxMenu.clientY) : null;
+
+  if (ctxMenu?.kind === "pane") {
+    chainRadialFlowRef.current = { x: ctxMenu.flowX, y: ctxMenu.flowY };
+  }
 
   const flowColumn = (
     <div
@@ -2686,6 +3130,7 @@ function GraphWorkspaceInner() {
         </div>
       ) : null}
       <ShowNodeTypeHeadingContext.Provider value={showNodeTypeHeadings}>
+        <GridSnapEnabledContext.Provider value={gridSnapEnabled}>
         <EdgeControlContext.Provider value={edgeControlApi}>
         <ReactFlow
           className={`min-h-0 flex-1 bg-[#0c0c0e] ${groupPath.length > 0 && !focusMode ? "pt-0" : ""}`}
@@ -2741,6 +3186,81 @@ function GraphWorkspaceInner() {
             className="!m-3 !border !border-zinc-700 !bg-zinc-900/95 !shadow-lg [&_button]:!border-zinc-700 [&_button]:!bg-zinc-900 [&_button]:!text-zinc-200 [&_button:hover]:!bg-zinc-800"
             showInteractive={false}
           />
+          <Panel position="top-right" className="!m-2 !border-0 !bg-transparent !p-0 !shadow-none">
+            <div className="flex items-center gap-0.5 rounded border border-zinc-800/80 bg-zinc-950/70 p-0.5">
+              {chainMode ? (
+                <span
+                  className="inline-flex h-7 w-7 items-center justify-center text-sky-400"
+                  title="Chain mode (C to exit)"
+                  role="status"
+                  aria-label="Chain mode on"
+                >
+                  <svg
+                    className="h-3.5 w-3.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <path d="M9 12a3 3 0 1 0 0-5 3 3 0 0 0 0 5" />
+                    <path d="M9 5H7a2 2 0 0 0-2 2v0a2 2 0 0 0 2 2h.5" />
+                    <path d="M9 5V3" />
+                    <path d="M15 12a3 3 0 1 0 0 5 3 3 0 0 0 0-5" />
+                    <path d="M15 19h2a2 2 0 0 0 2-2v0a2 2 0 0 0-2-2h-.5" />
+                    <path d="M15 19v2" />
+                    <path d="M9 14h6" />
+                  </svg>
+                </span>
+              ) : null}
+              <button
+                type="button"
+                aria-label="Undo"
+                title="Undo (Ctrl+Z)"
+                onClick={performUndo}
+                disabled={graphStackUi.past === 0}
+                className="inline-flex h-7 w-7 items-center justify-center rounded text-zinc-500 transition-colors hover:text-zinc-200 disabled:pointer-events-none disabled:opacity-35"
+              >
+                <svg
+                  className="h-3.5 w-3.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M3 7v6h6" />
+                  <path d="M21 17a9 9 0 0 0-9-9H3" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                aria-label="Redo"
+                title="Redo (Ctrl+Shift+Z)"
+                onClick={performRedo}
+                disabled={graphStackUi.future === 0}
+                className="inline-flex h-7 w-7 items-center justify-center rounded text-zinc-500 transition-colors hover:text-zinc-200 disabled:pointer-events-none disabled:opacity-35"
+              >
+                <svg
+                  className="h-3.5 w-3.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M21 7v6h-6" />
+                  <path d="M3 17a9 9 0 0 1 9-9h9" />
+                </svg>
+              </button>
+            </div>
+          </Panel>
           <Panel position="bottom-left" className="!m-3 mb-14 ml-3">
             <button
               type="button"
@@ -2760,6 +3280,7 @@ function GraphWorkspaceInner() {
           ) : null}
         </ReactFlow>
         </EdgeControlContext.Provider>
+        </GridSnapEnabledContext.Provider>
       </ShowNodeTypeHeadingContext.Provider>
       {proportionalMoveUi ? (
         <div className="pointer-events-none absolute bottom-20 left-1/2 z-[24] -translate-x-1/2 rounded-md border border-amber-600/80 bg-amber-950/95 px-3 py-1.5 text-center text-xs font-medium text-amber-100 shadow-lg">
@@ -2858,6 +3379,8 @@ function GraphWorkspaceInner() {
                   setCtxMenu(null);
                 }}
                 onClose={() => setCtxMenu(null)}
+                chainMode={chainMode}
+                onChainBatch={onChainBatchFromRadial}
               />
             </div>
           ) : ctxMenu.kind === "nodes" ? (
