@@ -35,7 +35,7 @@ import type {
 } from "@xyflow/react";
 import { EdgeControlContext, OpenSeerFlowEdge } from "@/components/openseer/OpenSeerFlowEdge";
 import { GraphSidebar } from "@/components/openseer/GraphSidebar";
-import { ShowNodeTypeHeadingContext } from "@/components/openseer/graph-workspace-ui-context";
+import { GridSnapEnabledContext, ShowNodeTypeHeadingContext } from "@/components/openseer/graph-workspace-ui-context";
 import { InspectorPanel } from "@/components/openseer/InspectorPanel";
 import { OpenSeerNode } from "@/components/openseer/OpenSeerNode";
 import { NodeStyleColorPanel } from "@/components/openseer/NodeStyleColorPanel";
@@ -2686,6 +2686,7 @@ function GraphWorkspaceInner() {
         </div>
       ) : null}
       <ShowNodeTypeHeadingContext.Provider value={showNodeTypeHeadings}>
+        <GridSnapEnabledContext.Provider value={gridSnapEnabled}>
         <EdgeControlContext.Provider value={edgeControlApi}>
         <ReactFlow
           className={`min-h-0 flex-1 bg-[#0c0c0e] ${groupPath.length > 0 && !focusMode ? "pt-0" : ""}`}
@@ -2760,6 +2761,7 @@ function GraphWorkspaceInner() {
           ) : null}
         </ReactFlow>
         </EdgeControlContext.Provider>
+        </GridSnapEnabledContext.Provider>
       </ShowNodeTypeHeadingContext.Provider>
       {proportionalMoveUi ? (
         <div className="pointer-events-none absolute bottom-20 left-1/2 z-[24] -translate-x-1/2 rounded-md border border-amber-600/80 bg-amber-950/95 px-3 py-1.5 text-center text-xs font-medium text-amber-100 shadow-lg">

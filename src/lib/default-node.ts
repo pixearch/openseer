@@ -29,5 +29,9 @@ export function createEmptyNodeData(nodeType: OpenSeerNodeType): OpenSeerNodeDat
   if (nodeType === "hub") {
     base.hubSides = 6;
   }
+  if (nodeType === "circle") {
+    base.circlePointCount = 1;
+    base.circleRotationDeg = 0;
+  }
   return base;
 }

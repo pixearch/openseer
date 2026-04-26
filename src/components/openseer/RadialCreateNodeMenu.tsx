@@ -37,6 +37,8 @@ function shortRadialLabel(t: OpenSeerNodeType): string {
       return "Group";
     case "hub":
       return "Hub";
+    case "circle":
+      return "Circle";
     default:
       return t;
   }
@@ -132,6 +134,13 @@ function SegmentIcon({ kind, active }: { kind: OpenSeerNodeType | "exit"; active
           <circle cx={18.5} cy={8} r={1.75} {...common} />
           <circle cx={12} cy={18} r={1.75} {...common} />
           <path {...common} d="M7.2 9.2 10.2 10.8M16.8 9.2 13.8 10.8M12 14.25V15.75" />
+        </svg>
+      );
+    case "circle":
+      return (
+        <svg width={22} height={22} viewBox="0 0 24 24" aria-hidden className="overflow-visible">
+          <circle cx={12} cy={12} r={7.5} {...common} />
+          <path {...common} d="M12 4.5V2M20 12h2.5M4 12H1.5" />
         </svg>
       );
     case "exit":

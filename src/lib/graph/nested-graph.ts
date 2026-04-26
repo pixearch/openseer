@@ -194,26 +194,39 @@ const HUB_SIDES_MIN = 3;
 const HUB_SIDES_MAX = 16;
 const HUB_HANDLE_ID_RE = /^hub-(\d+)-[ts]$/;
 
+const CIRCLE_POINT_MIN = 1;
+const CIRCLE_POINT_MAX = 24;
+const CIRCLE_HANDLE_ID_RE = /^circle-(\d+)-[ts]$/;
+
 function clampHubSidesCount(raw: unknown): number {
   const n = typeof raw === "number" && Number.isFinite(raw) ? Math.round(raw) : 6;
   return Math.min(HUB_SIDES_MAX, Math.max(HUB_SIDES_MIN, n));
 }
 
+function clampCirclePointCount(raw: unknown): number {
+  const n = typeof raw === "number" && Number.isFinite(raw) ? Math.round(raw) : 1;
+  return Math.min(CIRCLE_POINT_MAX, Math.max(CIRCLE_POINT_MIN, n));
+}
+
 /**
  * Removes `sourceHandle` / `targetHandle` when they reference a hub vertex index
- * that no longer exists (hubSides reduced). Prevents React Flow error #008.
+ * that no longer exists (hubSides reduced), or a circle point index
+ * (circlePointCount reduced). Prevents React Flow error #008.
  */
 export function sanitizeHubEdgesForLevel(
   nodes: Node<OpenSeerNodeData>[],
   edges: Edge<OpenSeerEdgeData>[]
 ): Edge<OpenSeerEdgeData>[] {
   const hubSides = new Map<string, number>();
+  const circlePts = new Map<string, number>();
   for (const n of nodes) {
     if (n.data.nodeType === "hub") {
       hubSides.set(n.id, clampHubSidesCount(n.data.hubSides));
+    } else if (n.data.nodeType === "circle") {
+      circlePts.set(n.id, clampCirclePointCount(n.data.circlePointCount));
     }
   }
-  if (hubSides.size === 0) return edges;
+  if (hubSides.size === 0 && circlePts.size === 0) return edges;
 
   let any = false;
   const out = edges.map((e) => {
@@ -233,6 +246,22 @@ export function sanitizeHubEdgesForLevel(
       const sides = hubSides.get(e.target)!;
       const m = HUB_HANDLE_ID_RE.exec(targetHandle);
       if (m && parseInt(m[1], 10) >= sides) {
+        targetHandle = undefined;
+        hit = true;
+      }
+    }
+    if (typeof sourceHandle === "string" && circlePts.has(e.source)) {
+      const pts = circlePts.get(e.source)!;
+      const m = CIRCLE_HANDLE_ID_RE.exec(sourceHandle);
+      if (m && parseInt(m[1], 10) >= pts) {
+        sourceHandle = undefined;
+        hit = true;
+      }
+    }
+    if (typeof targetHandle === "string" && circlePts.has(e.target)) {
+      const pts = circlePts.get(e.target)!;
+      const m = CIRCLE_HANDLE_ID_RE.exec(targetHandle);
+      if (m && parseInt(m[1], 10) >= pts) {
         targetHandle = undefined;
         hit = true;
       }
