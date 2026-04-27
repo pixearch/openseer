@@ -2,12 +2,16 @@ export type NavItem = {
   label: string;
   href: string;
   wired?: boolean;
+  /** When true, route still exists but the item is omitted from the app sidebar (MVP). */
+  hideFromSidebar?: boolean;
 };
 
 export type NavSection = {
   id: string;
   label: string;
   href: string;
+  /** When true, section routes still work but the section is omitted from the app sidebar (MVP). */
+  hideFromSidebar?: boolean;
   icon:
     | "home"
     | "workspace"
@@ -34,9 +38,9 @@ export const NAV_SECTIONS: NavSection[] = [
     mvpWired: true,
     items: [
       { label: "Dashboard", href: "/", wired: true },
-      { label: "Recent Work", href: "/home/recent", wired: true },
-      { label: "Favorites", href: "/home/favorites" },
-      { label: "Quick Start", href: "/home/quick-start", wired: true },
+      { label: "Recent Work", href: "/home/recent", wired: true, hideFromSidebar: true },
+      { label: "Favorites", href: "/home/favorites", hideFromSidebar: true },
+      { label: "Quick Start", href: "/home/quick-start", wired: true, hideFromSidebar: true },
     ],
   },
   {
@@ -46,11 +50,11 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: "workspace",
     mvpWired: true,
     items: [
-      { label: "All Workspaces", href: "/workspace" },
       { label: "My Workspaces", href: "/workspace/my" },
       { label: "Create Workspace", href: "/workspace/new" },
-      { label: "Shared Workspaces", href: "/workspace/shared" },
-      { label: "Archived Workspaces", href: "/workspace/archived" },
+      { label: "All Workspaces", href: "/workspace", hideFromSidebar: true },
+      { label: "Shared Workspaces", href: "/workspace/shared", hideFromSidebar: true },
+      { label: "Archived Workspaces", href: "/workspace/archived", hideFromSidebar: true },
     ],
   },
   {
@@ -60,12 +64,12 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: "graphs",
     mvpWired: true,
     items: [
-      { label: "All Graphs", href: "/graphs", wired: true },
       { label: "My Graphs", href: "/graphs/my" },
-      { label: "Shared Graphs", href: "/graphs/shared" },
-      { label: "Templates", href: "/graphs/templates" },
       { label: "Create New Graph", href: "/workspace/graph", wired: true },
-      { label: "Archived Graphs", href: "/graphs/archived" },
+      { label: "Templates", href: "/graphs/templates" },
+      { label: "All Graphs", href: "/graphs", wired: true, hideFromSidebar: true },
+      { label: "Shared Graphs", href: "/graphs/shared", hideFromSidebar: true },
+      { label: "Archived Graphs", href: "/graphs/archived", hideFromSidebar: true },
     ],
   },
   {
@@ -73,6 +77,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Teams",
     href: "/teams",
     icon: "teams",
+    hideFromSidebar: true,
     mvpWired: true,
     items: [
       { label: "All Teams", href: "/teams", wired: true },
@@ -91,6 +96,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Documents",
     href: "/documents",
     icon: "documents",
+    hideFromSidebar: true,
     mvpWired: true,
     items: [
       { label: "All Documents", href: "/documents", wired: true },
@@ -109,6 +115,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Activity",
     href: "/activity",
     icon: "activity",
+    hideFromSidebar: true,
     mvpWired: false,
     items: [
       { label: "Recent Activity", href: "/activity/recent" },
@@ -124,6 +131,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Search",
     href: "/search",
     icon: "search",
+    hideFromSidebar: true,
     mvpWired: false,
     items: [
       { label: "Global Search", href: "/search/global" },
@@ -138,6 +146,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Integrations",
     href: "/integrations",
     icon: "integrations",
+    hideFromSidebar: true,
     mvpWired: false,
     items: [
       { label: "GitHub", href: "/integrations/github" },
@@ -154,6 +163,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Admin",
     href: "/admin",
     icon: "admin",
+    hideFromSidebar: true,
     mvpWired: false,
     items: [
       { label: "Organizations", href: "/admin/organizations" },
@@ -175,12 +185,12 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: "Profile", href: "/settings/profile", wired: true },
       { label: "Appearance", href: "/settings/appearance" },
-      { label: "Notifications", href: "/settings/notifications" },
-      { label: "Preferences", href: "/settings/preferences" },
       { label: "Workspace Settings", href: "/settings/workspace" },
-      { label: "Security Settings", href: "/settings/security" },
-      { label: "Billing", href: "/settings/billing" },
-      { label: "About", href: "/settings/about" },
+      { label: "Notifications", href: "/settings/notifications", hideFromSidebar: true },
+      { label: "Preferences", href: "/settings/preferences", hideFromSidebar: true },
+      { label: "Security Settings", href: "/settings/security", hideFromSidebar: true },
+      { label: "Billing", href: "/settings/billing", hideFromSidebar: true },
+      { label: "About", href: "/settings/about", hideFromSidebar: true },
     ],
   },
 ];

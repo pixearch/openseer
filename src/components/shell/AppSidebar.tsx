@@ -41,9 +41,10 @@ export function AppSidebar({ collapsed }: AppSidebarProps) {
     >
       <div className="flex-1 overflow-y-auto overflow-x-hidden py-2">
         <nav className="flex flex-col gap-0.5 px-2">
-          {NAV_SECTIONS.map((section) => {
+          {NAV_SECTIONS.filter((s) => !s.hideFromSidebar).map((section) => {
             const active = sectionIsActive(section, pathname);
             const isOpen = expanded[section.id] && !collapsed;
+            const items = section.items.filter((i) => !i.hideFromSidebar);
 
             return (
               <div key={section.id} className="rounded-md">
@@ -85,7 +86,7 @@ export function AppSidebar({ collapsed }: AppSidebarProps) {
                 </div>
                 {!collapsed && isOpen ? (
                   <ul className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800 pl-2">
-                    {section.items.map((item) => {
+                    {items.map((item) => {
                       const itemActive = pathname === item.href;
                       return (
                         <li key={item.href}>
