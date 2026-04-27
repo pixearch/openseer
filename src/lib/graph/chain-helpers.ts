@@ -1,4 +1,4 @@
-import type { Node } from "@xyflow/react";
+import { type Node, Position } from "@xyflow/react";
 import { NODE_STANDARD_HEIGHT, NODE_STANDARD_WIDTH, GROUP_STANDARD_HEIGHT, GROUP_STANDARD_WIDTH } from "@/lib/default-node";
 import type { OpenSeerNodeData, OpenSeerNodeType } from "@/lib/types/graph";
 
@@ -47,6 +47,27 @@ export function pickQuadrilateralChainHandles(
     return { sourceHandle: `${sourceId}__bs`, targetHandle: `${targetId}__tt` };
   }
   return { sourceHandle: `${sourceId}__ts`, targetHandle: `${targetId}__bt` };
+}
+
+const QUAD_FACE_TO_POSITION: Record<string, Position> = {
+  rs: Position.Right,
+  ts: Position.Top,
+  ls: Position.Left,
+  bs: Position.Bottom,
+  lt: Position.Left,
+  tt: Position.Top,
+  rt: Position.Right,
+  bt: Position.Bottom,
+};
+
+/** Maps a quadrilateral handle id (…__rs, …__lt, etc. in OpenSeerNode) to its React Flow `Position`. */
+export function positionForQuadrilateralHandleId(
+  handle: string | null | undefined
+): Position | undefined {
+  if (typeof handle !== "string") return undefined;
+  const m = /__(rs|ts|ls|bs|lt|tt|rt|bt)$/.exec(handle);
+  if (!m) return undefined;
+  return QUAD_FACE_TO_POSITION[m[1]!];
 }
 
 /**

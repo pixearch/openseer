@@ -12,6 +12,7 @@ import {
   MarkerType,
   MiniMap,
   Panel,
+  Position,
   ReactFlow,
   ReactFlowProvider,
   SelectionMode,
@@ -54,6 +55,7 @@ import {
 import {
   isExcludedFromChainType,
   pickQuadrilateralChainHandles,
+  positionForQuadrilateralHandleId,
   sizeForNewNodeType,
   sortNodesForChainLayout,
 } from "@/lib/graph/chain-helpers";
@@ -2892,26 +2894,47 @@ function GraphWorkspaceInner() {
       if (v.edges.some((ed) => ed.source === A && ed.target === B)) return d;
       if (v.edges.some((ed) => ed.source === B && ed.target === C)) return d;
 
+      const nA = v.nodes.find((n) => n.id === A);
+      const nB = v.nodes.find((n) => n.id === B);
+      const nC = v.nodes.find((n) => n.id === C);
+      if (!nA || !nB || !nC) return d;
+
+      const hAB = pickQuadrilateralChainHandles(A, B, nA, nB);
+      const hBC = pickQuadrilateralChainHandles(B, C, nB, nC);
+      const bTargetPos = positionForQuadrilateralHandleId(hAB.targetHandle);
+      const bSourcePos = positionForQuadrilateralHandleId(hBC.sourceHandle);
+
+      const {
+        id: _splitOrigId,
+        source: _splitS,
+        target: _splitT,
+        sourceHandle: origSourceHandle,
+        targetHandle: origTargetHandle,
+        sourcePosition: origSourcePosition,
+        targetPosition: origTargetPosition,
+        ...edgeRest
+      } = edge as Edge<OpenSeerEdgeData> & { sourcePosition?: Position; targetPosition?: Position };
       const ne = v.edges.filter((ed) => ed.id !== hoverId);
-      const edgeTemplate = { ...edge } as Record<string, unknown>;
-      delete edgeTemplate.id;
-      delete edgeTemplate.source;
-      delete edgeTemplate.target;
-      delete edgeTemplate.sourceHandle;
-      delete edgeTemplate.targetHandle;
-      const edgeRest = edgeTemplate as Omit<Edge<OpenSeerEdgeData>, "id" | "source" | "target">;
       ne.push(
         {
           ...edgeRest,
           id: `e-${A}-${B}-${crypto.randomUUID().slice(0, 8)}`,
           source: A,
           target: B,
+          sourceHandle: origSourceHandle,
+          targetHandle: hAB.targetHandle,
+          ...(origSourcePosition !== undefined ? { sourcePosition: origSourcePosition } : {}),
+          ...(bTargetPos !== undefined ? { targetPosition: bTargetPos } : {}),
         },
         {
           ...edgeRest,
           id: `e-${B}-${C}-${crypto.randomUUID().slice(0, 8)}`,
           source: B,
           target: C,
+          sourceHandle: hBC.sourceHandle,
+          targetHandle: origTargetHandle,
+          ...(bSourcePos !== undefined ? { sourcePosition: bSourcePos } : {}),
+          ...(origTargetPosition !== undefined ? { targetPosition: origTargetPosition } : {}),
         }
       );
       if (path.length === 0) return { nodes: d.nodes, edges: ne };
