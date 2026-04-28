@@ -126,8 +126,8 @@ export function bootstrapOrthogonalInteriorFromSmoothStep(params: {
     stepPosition: params.pathOptions?.stepPosition ?? 0.5,
   });
   const pts = normalizeOrthogonalVertexChain(parseSmoothStepPathToPoints(pathD));
-  const aligned = alignOrthogonalPolylineToHandles(pts, params.sourcePosition, params.targetPosition);
-  const inner = aligned.slice(1, -1);
+  /** Do not persist handle-alignment stubs; render path applies {@link alignOrthogonalPolylineToHandles}. */
+  const inner = pts.length > 2 ? pts.slice(1, -1) : [];
   return inner.map((p) => ({ x: p.x, y: p.y, id: newControlPointId() }));
 }
 
@@ -269,9 +269,11 @@ export function insertOrthogonalBendOnDisplay(
     ins,
     ...orthoDisplay.slice(hit.segIndex + 1),
   ];
-  const deduped = dedupeConsecutiveOrthoVertices(nextDisplay);
-  const aligned = alignOrthogonalPolylineToHandles(deduped, sourcePosition, targetPosition);
-  return remapOrthogonalInteriorPreservingIds(prevInterior, aligned.slice(1, -1));
+  const elbowed = replaceDiagonalSegmentsWithOrthogonalElbows(nextDisplay);
+  const deduped = dedupeConsecutiveOrthoVertices(elbowed);
+  const minimal = normalizeOrthogonalVertexChain(deduped);
+  const inner = minimal.length > 2 ? minimal.slice(1, -1) : [];
+  return remapOrthogonalInteriorPreservingIds(prevInterior, inner);
 }
 
 /** Move one interior bend; keep all bends; do not collapse collinear runs. */
@@ -287,6 +289,8 @@ export function moveOrthogonalInteriorPoint(
   sourcePosition: Position,
   targetPosition: Position
 ): OpenSeerOrthogonalPathPoint[] {
+  void sourcePosition;
+  void targetPosition;
   const cur = interior.find((p) => p.id === pointId);
   let cx = nx;
   let cy = ny;
@@ -332,8 +336,10 @@ export function moveOrthogonalInteriorPoint(
   raw = replaceDiagonalSegmentsWithOrthogonalElbows(raw);
   let deduped = dedupeConsecutiveOrthoVertices(raw);
   deduped = ensureInsertedAxisVertex(deduped, { x: cx, y: cy });
-  const aligned = alignOrthogonalPolylineToHandles(deduped, sourcePosition, targetPosition);
-  return remapOrthogonalInteriorPreservingIds(replaced, aligned.slice(1, -1), { id: pointId, x: cx, y: cy });
+  /** Persist minimal bends only; alignment stubs are display-only (see {@link getOrthogonalPolylineVertices}). */
+  const minimal = normalizeOrthogonalVertexChain(deduped);
+  const inner = minimal.length > 2 ? minimal.slice(1, -1) : [];
+  return remapOrthogonalInteriorPreservingIds(replaced, inner, { id: pointId, x: cx, y: cy });
 }
 
 /**
@@ -608,10 +614,13 @@ export function fullVerticesToOrthogonalPath(
   sourcePosition: Position,
   targetPosition: Position
 ): OpenSeerOrthogonalPathPoint[] {
+  void sourcePosition;
+  void targetPosition;
   if (full.length <= 2) return [];
   const deduped = dedupeConsecutiveOrthoVertices(full);
-  const aligned = alignOrthogonalPolylineToHandles(deduped, sourcePosition, targetPosition);
-  return remapOrthogonalInteriorPreservingIds(prevInterior, aligned.slice(1, -1));
+  const minimal = normalizeOrthogonalVertexChain(deduped);
+  if (minimal.length <= 2) return [];
+  return remapOrthogonalInteriorPreservingIds(prevInterior, minimal.slice(1, -1));
 }
 
 /**
@@ -905,12 +914,10 @@ export function migrateEdgeGeometryForRouting(
         ...orthoStored.map((p) => ({ x: p.x, y: p.y })),
         { x: geom.targetX, y: geom.targetY },
       ];
-      const repaired = alignOrthogonalPolylineToHandles(
-        normalizeOrthogonalVertexChain(replaceDiagonalSegmentsWithOrthogonalElbows(raw)),
-        geom.sourcePosition,
-        geom.targetPosition
+      const repairedMinimal = normalizeOrthogonalVertexChain(
+        dedupeConsecutiveOrthoVertices(replaceDiagonalSegmentsWithOrthogonalElbows(raw))
       );
-      const repairedInterior = repaired.slice(1, -1);
+      const repairedInterior = repairedMinimal.length > 2 ? repairedMinimal.slice(1, -1) : [];
       const normalizedPath = remapOrthogonalInteriorPreservingIds(orthoStored, repairedInterior);
       return { orthogonalPath: normalizedPath.length > 0 ? normalizedPath : undefined, controlPoints: [] };
     }
@@ -945,11 +952,7 @@ export function migrateEdgeGeometryForRouting(
         geom.targetX,
         geom.targetY
       );
-      interiorPts = alignOrthogonalPolylineToHandles(
-        normalizeOrthogonalVertexChain(expanded),
-        geom.sourcePosition,
-        geom.targetPosition
-      ).slice(1, -1);
+      interiorPts = normalizeOrthogonalVertexChain(expanded).slice(1, -1);
     }
 
     if (interiorPts.length === 0) {
@@ -974,11 +977,7 @@ export function migrateEdgeGeometryForRouting(
       ...orthoStored.map((p) => ({ x: p.x, y: p.y })),
       { x: geom.targetX, y: geom.targetY },
     ];
-    interior = alignOrthogonalPolylineToHandles(
-      normalizeOrthogonalVertexChain(rawVerts),
-      geom.sourcePosition,
-      geom.targetPosition
-    ).slice(1, -1);
+    interior = normalizeOrthogonalVertexChain(rawVerts).slice(1, -1);
   } else if (cps.length > 0) {
     const baselineD = getBaselinePathD(
       "orthogonal",
@@ -1001,11 +1000,7 @@ export function migrateEdgeGeometryForRouting(
       geom.targetX,
       geom.targetY
     );
-    interior = alignOrthogonalPolylineToHandles(
-      normalizeOrthogonalVertexChain(expanded),
-      geom.sourcePosition,
-      geom.targetPosition
-    ).slice(1, -1);
+    interior = normalizeOrthogonalVertexChain(expanded).slice(1, -1);
   }
 
   const cpType: OpenSeerControlPointType = nextRouting === "bezier" ? "bezier" : "angled";
