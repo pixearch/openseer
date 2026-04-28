@@ -120,6 +120,10 @@ import type {
   OpenSeerOrthogonalPathPoint,
 } from "@/lib/types/graph";
 import { GRAPH_WORKSPACE_NODE_TYPE_LIST } from "@/lib/types/graph";
+import { useHotkeyBindings } from "@/components/shell/hotkey-bindings-provider";
+import { chordMatches, type Chord } from "@/lib/hotkeys/chord";
+import { isGlobalHotkeySuppressedEventTarget } from "@/lib/hotkeys/editable-target";
+import { getDefaultChord, type EditableHotkey } from "@/lib/hotkeys/registry";
 
 const nodeTypes = { openSeer: OpenSeerNode };
 
@@ -405,6 +409,12 @@ function GraphWorkspaceInner() {
   const arrowPanStepRef = useRef(ARROW_PAN_STEP_DEFAULT);
   const { screenToFlowPosition, fitView, getNodes } = useReactFlow();
   const store = useStoreApi();
+  const hotkeyBindings = useHotkeyBindings();
+  const ch = useCallback(
+    (id: EditableHotkey): Chord =>
+      hotkeyBindings != null ? hotkeyBindings.chord(id) : getDefaultChord(id),
+    [hotkeyBindings]
+  );
 
   const [ready, setReady] = useState(false);
   const [graphMeta, setGraphMeta] = useState({ id: SEED_GRAPH_ID, name: SEED_GRAPH_NAME });
@@ -792,7 +802,10 @@ function GraphWorkspaceInner() {
   useEffect(() => {
     if (!focusMode) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFocusMode(false);
+      if (e.key !== "Escape") return;
+      if (isGlobalHotkeySuppressedEventTarget(e.target)) return;
+      if ((e.target as HTMLElement | null)?.closest?.("#openseer-hotkeys-dialog")) return;
+      setFocusMode(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -801,23 +814,18 @@ function GraphWorkspaceInner() {
   useEffect(() => {
     if (!ctxMenu || ctxMenu.kind !== "pane") return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === "Space") e.preventDefault();
+      if (chordMatches(ch("radialFromSpace"), e)) e.preventDefault();
     };
     window.addEventListener("keydown", onKey, { passive: false });
     return () => window.removeEventListener("keydown", onKey);
-  }, [ctxMenu]);
+  }, [ch, ctxMenu]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code !== "Space") return;
+      if (!chordMatches(ch("radialFromSpace"), e)) return;
       if (e.repeat) return;
-      const el = e.target;
-      if (
-        el instanceof HTMLElement &&
-        (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
-      ) {
-        return;
-      }
+      if (isGlobalHotkeySuppressedEventTarget(e.target)) return;
+      if ((e.target as HTMLElement | null)?.closest?.("#openseer-hotkeys-dialog")) return;
       if (!graphPointerInside.current) return;
       if (ctxMenu) return;
       e.preventDefault();
@@ -833,29 +841,27 @@ function GraphWorkspaceInner() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ctxMenu, screenToFlowPosition]);
+  }, [ch, ctxMenu, screenToFlowPosition]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target;
-      if (
-        el instanceof HTMLElement &&
-        (el.tagName === "INPUT" ||
-          el.tagName === "TEXTAREA" ||
-          el.tagName === "SELECT" ||
-          el.isContentEditable)
-      ) {
-        return;
-      }
+      if (isGlobalHotkeySuppressedEventTarget(e.target)) return;
+      if ((e.target as HTMLElement | null)?.closest?.("#openseer-hotkeys-dialog")) return;
       if (ctxMenu) return;
       if (alignOverlayRef.current) return;
 
-      if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z") && !e.altKey) {
+      if (chordMatches(ch("redo"), e)) {
         if (textEditOpenRef.current || codeEditOpenRef.current) return;
         if (!graphPointerInside.current) return;
         e.preventDefault();
-        if (e.shiftKey) performRedo();
-        else performUndo();
+        performRedo();
+        return;
+      }
+      if (chordMatches(ch("undo"), e)) {
+        if (textEditOpenRef.current || codeEditOpenRef.current) return;
+        if (!graphPointerInside.current) return;
+        e.preventDefault();
+        performUndo();
         return;
       }
 
@@ -875,9 +881,7 @@ function GraphWorkspaceInner() {
         return;
       }
 
-      const k = e.key.length === 1 ? e.key.toLowerCase() : "";
-
-      if (k === "f") {
+      if (chordMatches(ch("focusMode"), e)) {
         if (focusMode) {
           e.preventDefault();
           setFocusMode(false);
@@ -891,7 +895,7 @@ function GraphWorkspaceInner() {
 
       if (!graphPointerInside.current) return;
 
-      if (k === "c" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (chordMatches(ch("chainToggle"), e)) {
         if (e.repeat) return;
         if (textEditOpenRef.current || codeEditOpenRef.current) return;
         e.preventDefault();
@@ -900,7 +904,7 @@ function GraphWorkspaceInner() {
         return;
       }
 
-      if (e.key === "Enter" && chainMode) {
+      if (chordMatches(ch("chainConnect"), e) && chainMode) {
         const m = selectionRef.current.multiNodeIds;
         if (m && m.length >= 2) {
           e.preventDefault();
@@ -953,7 +957,7 @@ function GraphWorkspaceInner() {
         return;
       }
 
-      if (e.code === "KeyG") {
+      if (chordMatches(ch("grabControlPoint"), e)) {
         if (controlPointGrabRef.current) {
           e.preventDefault();
           return;
@@ -1017,7 +1021,7 @@ function GraphWorkspaceInner() {
         return;
       }
 
-      if (k === "b") {
+      if (chordMatches(ch("breakFromChain"), e)) {
         if (e.repeat) return;
         const selId = selectionRef.current.nodeId;
         if (!selId) return;
@@ -1065,15 +1069,22 @@ function GraphWorkspaceInner() {
         return;
       }
 
-      if (k === "a") {
+      if (chordMatches(ch("evenSpacing"), e)) {
         const ids = selectionRef.current.multiNodeIds;
         if (!ids || ids.length < 2) return;
         e.preventDefault();
-        setAlignOverlay(e.shiftKey ? "distribute" : "align");
+        setAlignOverlay("distribute");
+        return;
+      }
+      if (chordMatches(ch("alignNodes"), e)) {
+        const ids = selectionRef.current.multiNodeIds;
+        if (!ids || ids.length < 2) return;
+        e.preventDefault();
+        setAlignOverlay("align");
         return;
       }
 
-      if (k === "m") {
+      if (chordMatches(ch("proportionalMove"), e)) {
         if (e.repeat) return;
         e.preventDefault();
         if (proportionalLayoutRef.current) {
@@ -1096,14 +1107,14 @@ function GraphWorkspaceInner() {
         return;
       }
 
-      if (k === "s") {
+      if (chordMatches(ch("gridSnap"), e)) {
         if (e.repeat) return;
         e.preventDefault();
         setGridSnapEnabled((v) => !v);
         return;
       }
 
-      if (k === "h") {
+      if (chordMatches(ch("overview"), e)) {
         if (e.repeat) return;
         const t = e.target;
         if (t instanceof HTMLElement && t.tagName === "SELECT") return;
@@ -1112,13 +1123,13 @@ function GraphWorkspaceInner() {
         return;
       }
 
-      if (k === "e") {
+      if (chordMatches(ch("fitAll"), e)) {
         e.preventDefault();
         void fitView({ padding: 0.12, duration: 250, maxZoom: 2 });
         return;
       }
 
-      if (k === "z") {
+      if (chordMatches(ch("zoomToSelection"), e)) {
         const sel = selectionRef.current;
         const ids =
           sel.multiNodeIds && sel.multiNodeIds.length > 0
@@ -1137,14 +1148,14 @@ function GraphWorkspaceInner() {
         return;
       }
 
-      if (e.code === "KeyD" && e.ctrlKey && !e.metaKey) {
+      if (chordMatches(ch("duplicateExact"), e) || chordMatches(ch("duplicate"), e)) {
         if (textEditOpenRef.current || codeEditOpenRef.current) return;
         if (!graphPointerInside.current) return;
         const sourceId =
           selectionRef.current.nodeId ?? selectionRef.current.multiNodeIds?.[0] ?? null;
         if (!sourceId) return;
         e.preventDefault();
-        const exact = e.shiftKey;
+        const exact = chordMatches(ch("duplicateExact"), e);
         setDoc((d) => {
           if (!isApplyingHistoryRef.current) pushUndoSnapshot(d);
           const path = groupPathRef.current;
@@ -1202,6 +1213,7 @@ function GraphWorkspaceInner() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
+    ch,
     ctxMenu,
     fitView,
     focusMode,
@@ -1214,16 +1226,8 @@ function GraphWorkspaceInner() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target;
-      if (
-        el instanceof HTMLElement &&
-        (el.tagName === "INPUT" ||
-          el.tagName === "TEXTAREA" ||
-          el.tagName === "SELECT" ||
-          el.isContentEditable)
-      ) {
-        return;
-      }
+      if (isGlobalHotkeySuppressedEventTarget(e.target)) return;
+      if ((e.target as HTMLElement | null)?.closest?.("#openseer-hotkeys-dialog")) return;
       if (ctxMenu) return;
       if (alignOverlayRef.current) return;
       if (!graphPointerInside.current) return;
@@ -1238,30 +1242,53 @@ function GraphWorkspaceInner() {
         return;
       }
 
-      if (e.shiftKey && (code === "ArrowUp" || code === "ArrowDown")) {
+      if (chordMatches(ch("panFaster"), e) && code === "ArrowUp") {
         e.preventDefault();
         const cur = arrowPanStepRef.current;
-        if (code === "ArrowUp") {
-          arrowPanStepRef.current = Math.min(ARROW_PAN_STEP_MAX, cur + ARROW_PAN_SPEED_STEP);
-        } else {
-          arrowPanStepRef.current = Math.max(ARROW_PAN_STEP_MIN, cur - ARROW_PAN_SPEED_STEP);
-        }
+        arrowPanStepRef.current = Math.min(ARROW_PAN_STEP_MAX, cur + ARROW_PAN_SPEED_STEP);
+        return;
+      }
+      if (chordMatches(ch("panSlower"), e) && code === "ArrowDown") {
+        e.preventDefault();
+        const cur = arrowPanStepRef.current;
+        arrowPanStepRef.current = Math.max(ARROW_PAN_STEP_MIN, cur - ARROW_PAN_SPEED_STEP);
         return;
       }
 
       if (e.shiftKey) return;
 
-      e.preventDefault();
-      const step = arrowPanStepRef.current;
-      const panBy = store.getState().panBy;
-      if (code === "ArrowUp") void panBy({ x: 0, y: step });
-      else if (code === "ArrowDown") void panBy({ x: 0, y: -step });
-      else if (code === "ArrowLeft") void panBy({ x: step, y: 0 });
-      else void panBy({ x: -step, y: 0 });
+      if (chordMatches(ch("panUp"), e) && code === "ArrowUp") {
+        e.preventDefault();
+        const step = arrowPanStepRef.current;
+        const panBy = store.getState().panBy;
+        void panBy({ x: 0, y: step });
+        return;
+      }
+      if (chordMatches(ch("panDown"), e) && code === "ArrowDown") {
+        e.preventDefault();
+        const step = arrowPanStepRef.current;
+        const panBy = store.getState().panBy;
+        void panBy({ x: 0, y: -step });
+        return;
+      }
+      if (chordMatches(ch("panLeft"), e) && code === "ArrowLeft") {
+        e.preventDefault();
+        const step = arrowPanStepRef.current;
+        const panBy = store.getState().panBy;
+        void panBy({ x: step, y: 0 });
+        return;
+      }
+      if (chordMatches(ch("panRight"), e) && code === "ArrowRight") {
+        e.preventDefault();
+        const step = arrowPanStepRef.current;
+        const panBy = store.getState().panBy;
+        void panBy({ x: -step, y: 0 });
+        return;
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ctxMenu, store, alignOverlay]);
+  }, [ch, ctxMenu, store, alignOverlay]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<Node<OpenSeerNodeData>>[]) => {
@@ -3072,9 +3099,11 @@ function GraphWorkspaceInner() {
   const radialPos =
     ctxMenu?.kind === "pane" ? clampRadialMenuCenter(ctxMenu.clientX, ctxMenu.clientY) : null;
 
-  if (ctxMenu?.kind === "pane") {
-    chainRadialFlowRef.current = { x: ctxMenu.flowX, y: ctxMenu.flowY };
-  }
+  useLayoutEffect(() => {
+    if (ctxMenu?.kind === "pane") {
+      chainRadialFlowRef.current = { x: ctxMenu.flowX, y: ctxMenu.flowY };
+    }
+  }, [ctxMenu]);
 
   const flowColumn = (
     <div

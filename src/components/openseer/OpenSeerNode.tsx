@@ -1293,30 +1293,18 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
           <div className={`${OS_QUAD_NODE_FACE} flex min-h-0 flex-1 flex-col overflow-hidden rounded-md`}>
           <div
             className={[
-              "flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-2 py-1",
+              "flex shrink-0 flex-col gap-1 border-b border-zinc-800/80 px-2 py-1",
               chrome.useTransparentOuter && !chrome.headerStyle ? "bg-zinc-900/95" : "",
             ]
               .filter(Boolean)
               .join(" ")}
             style={{
               ...chrome.headerStyle,
-              minHeight: nodeHeaderContainerMinHeightPx("compactToolbar", data, showTypeHeading),
+              minHeight:
+                nodeHeaderContainerMinHeightPx("compactToolbar", data, showTypeHeading) + 24,
             }}
           >
-            <div className="min-w-0 flex-1">
-              {showTypeHeading ? (
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                  {typeLabel}
-                </span>
-              ) : null}
-              <div
-                className="truncate text-sm font-medium text-zinc-100"
-                style={resolveHeaderTitleStyle(data)}
-              >
-                {data.title}
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
+            <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-x-1 gap-y-0.5">
               <button
                 type="button"
                 className="rounded border border-zinc-600 px-1.5 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800"
@@ -1351,6 +1339,19 @@ function OpenSeerNodeInner(props: NodeProps<Node<OpenSeerNodeData>>) {
                   Download
                 </a>
               ) : null}
+            </div>
+            <div className="min-w-0 w-full">
+              {showTypeHeading ? (
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                  {typeLabel}
+                </span>
+              ) : null}
+              <div
+                className="truncate text-sm font-medium text-zinc-100"
+                style={resolveHeaderTitleStyle(data)}
+              >
+                {data.title}
+              </div>
             </div>
           </div>
           <div
