@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
+import { HotkeysModal } from "@/components/shell/HotkeysModal";
 import { CREATE_MENU_ITEMS, WORKSPACE_CONTEXT_DEFAULT } from "@/lib/nav/navigation";
 
 interface AppHeaderProps {
@@ -12,6 +13,9 @@ interface AppHeaderProps {
 export function AppHeader({ onMenuClick }: AppHeaderProps) {
   const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [hotkeysOpen, setHotkeysOpen] = useState(false);
+  const [hotkeysKey, setHotkeysKey] = useState(0);
   const [profileOpen, setProfileOpen] = useState(false);
   const createRef = useRef<HTMLDivElement>(null);
 
@@ -114,12 +118,45 @@ export function AppHeader({ onMenuClick }: AppHeaderProps) {
           <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-sky-500 ring-2 ring-zinc-950" />
         </button>
 
-        <Link
-          href="/settings/about"
-          className="hidden h-9 items-center px-2 text-sm text-zinc-400 hover:text-zinc-200 sm:flex"
-        >
-          Help
-        </Link>
+        <div className="relative hidden sm:block">
+          <button
+            type="button"
+            onClick={() => setHelpOpen((o) => !o)}
+            className="flex h-9 items-center rounded-md px-2 text-sm text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+            aria-haspopup="menu"
+            aria-expanded={helpOpen}
+          >
+            Help
+          </button>
+          {helpOpen ? (
+            <>
+              <button
+                type="button"
+                className="fixed inset-0 z-30 cursor-default bg-transparent"
+                aria-label="Close help menu"
+                onClick={() => setHelpOpen(false)}
+              />
+              <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl">
+                <button
+                  type="button"
+                  className="block w-full px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                  onClick={() => {
+                    setHelpOpen(false);
+                    setHotkeysKey((k) => k + 1);
+                    setHotkeysOpen(true);
+                  }}
+                >
+                  Hotkeys
+                </button>
+              </div>
+            </>
+          ) : null}
+        </div>
+        <HotkeysModal
+          key={hotkeysKey}
+          open={hotkeysOpen}
+          onClose={() => setHotkeysOpen(false)}
+        />
 
         <div className="relative">
           <button
